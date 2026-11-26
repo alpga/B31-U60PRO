@@ -201,7 +201,9 @@ final class AgentClient {
         // dashboard, the ETAs from the agent's own battery-info.
         if allowCompat, method == "GET", path == "/api/device/battery-info" {
             let dashboard = try await rawSource("/api/dashboard")
-            let info = try await rawSource("/api/device/battery-info")
+            // `battery-info` reports the ETAs as null; `battery/detail` carries the
+            // firmware's own seconds, so that is the source for the two times.
+            let info = try await rawSource("/api/device/battery/detail")
             return try parse(try AgentCompat.batteryInfo(dashboard: dashboard, info: info))
         }
         if allowCompat, AgentCompat.handles(path, method: method) {

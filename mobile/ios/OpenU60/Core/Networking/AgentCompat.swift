@@ -124,6 +124,8 @@ enum AgentCompat {
                 "dhcp_start": data["dhcp_start"] as? String ?? "",
                 "dhcp_end": data["dhcp_end"] as? String ?? "",
                 "dhcp_lease_time": String(int(data["lease_seconds"], default: 0)),
+                "dns_pri": dnsValue(data["dns_pri"]),
+                "dns_sec": dnsValue(data["dns_sec"]),
             ]
             value = lan
         case "/api/router/apn/auto-profiles":
@@ -215,8 +217,13 @@ enum AgentCompat {
         var value = battery(from: data)
         if let detail = try JSONSerialization.jsonObject(with: info) as? [String: Any],
            let payload = detail["data"] as? [String: Any] {
-            if let full = payload["time_to_full_mins"] as? NSNumber { value["battery_time_to_full"] = full.intValue }
-            if let empty = payload["time_to_empty_mins"] as? NSNumber { value["battery_time_to_empty"] = empty.intValue }
+            // `battery/detail` reports seconds; the app's model is in minutes.
+            if let secs = payload["time_to_full_secs"] as? NSNumber, secs.doubleValue > 0 {
+                value["battery_time_to_full"] = Int(secs.doubleValue / 60)
+            }
+            if let secs = payload["time_to_empty_secs"] as? NSNumber, secs.doubleValue > 0 {
+                value["battery_time_to_empty"] = Int(secs.doubleValue / 60)
+            }
             if let online = payload["online"] as? Bool { value["online"] = online }
         }
         return try JSONSerialization.data(withJSONObject: ["ok": true, "data": value])
@@ -370,6 +377,12 @@ enum AgentCompat {
         let view = data["view"] as? [String: Any] ?? [:]
         let profiles = view["profiles"] as? [[String: Any]] ?? []
         return profiles.first { $0["enabled"] as? Bool == true }?["iccid"] as? String
+    }
+
+    /// "0.0.0.0" is the firmware's "inherit from WAN", which the screen shows as empty.
+    private static func dnsValue(_ value: Any?) -> String {
+        let text = value as? String ?? ""
+        return (text == "0.0.0.0" || text == "::") ? "" : text
     }
 
     // MARK: - JSON numbers

@@ -34,6 +34,10 @@ struct LANSettingsView: View {
                         .keyboardType(.decimalPad)
                         .autocorrectionDisabled()
                     TextField("租约时间（秒）", text: $viewModel.editLeaseTime)
+                    TextField("主 DNS（留空则用 WAN DNS）", text: $viewModel.editDnsPrimary)
+                        .keyboardType(.numbersAndPunctuation)
+                    TextField("备 DNS", text: $viewModel.editDnsSecondary)
+                        .keyboardType(.numbersAndPunctuation)
                         .keyboardType(.numberPad)
                 }
             }

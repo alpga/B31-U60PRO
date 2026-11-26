@@ -55,12 +55,14 @@ struct FirewallSettingsView: View {
             }
 
             Section("SIP ALG") {
-                Toggle("启用 SIP ALG", isOn: $viewModel.editSipAlg)
-                Button {
-                    Task { await viewModel.applySipAlg() }
-                } label: {
-                    Text("应用 SIP ALG")
-                }
+                // Same interaction as NAT: flipping the switch applies it.
+                Toggle("启用 SIP ALG", isOn: Binding(
+                    get: { viewModel.editSipAlg },
+                    set: { value in
+                        viewModel.editSipAlg = value
+                        Task { await viewModel.applySipAlg() }
+                    }
+                ))
             }
 
             Section("DMZ") {

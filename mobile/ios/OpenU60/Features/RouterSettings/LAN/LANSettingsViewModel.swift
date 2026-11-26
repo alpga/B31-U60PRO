@@ -15,6 +15,9 @@ final class LANSettingsViewModel {
     var editDhcpStart: String = ""
     var editDhcpEnd: String = ""
     var editLeaseTime: String = ""
+    /// Servers DHCP hands to clients; empty means "use the WAN DNS".
+    var editDnsPrimary: String = ""
+    var editDnsSecondary: String = ""
 
     private let client: AgentClient
     private let authManager: AuthManager
@@ -31,6 +34,8 @@ final class LANSettingsViewModel {
         do {
             let data = try await client.getJSON("/api/router/lan")
             config = LANParser.parse(data)
+            editDnsPrimary = data["dns_pri"] as? String ?? ""
+            editDnsSecondary = data["dns_sec"] as? String ?? ""
             syncEditFields()
         } catch {
             showMessage("加载 LAN 设置失败：\(error.localizedDescription)", isError: true)
@@ -58,6 +63,8 @@ final class LANSettingsViewModel {
                 "dhcp_start": editDhcpStart,
                 "dhcp_end": editDhcpEnd,
                 "lease_seconds": lease,
+                "dns_pri": editDnsPrimary,
+                "dns_sec": editDnsSecondary,
             ]
             let _ = try await client.putJSON("/api/router/lan", body: body)
             showMessage("LAN 设置已更新", isError: false)
