@@ -107,7 +107,7 @@ enum AgentCompat {
         case "/api/router/lan":
             // The firmware names these `ipaddr`/`netmask`/`dhcp_enabled`; the LAN
             // screen reads the older `lan_*` spelling.
-            value = [
+            let lan: [String: Any] = [
                 "lan_ipaddr": data["ipaddr"] as? String ?? "",
                 "lan_netmask": data["netmask"] as? String ?? "",
                 "dhcp_enable": (data["dhcp_enabled"] as? Bool ?? false) ? "1" : "0",
@@ -115,27 +115,33 @@ enum AgentCompat {
                 "dhcp_end": data["dhcp_end"] as? String ?? "",
                 "dhcp_lease_time": String(int(data["lease_seconds"], default: 0)),
             ]
+            value = lan
         case "/api/dns/status":
             // `/api/router/dns` uses dns_mode/prefer_dns_manual; the DNS screen
             // expects mode/primary/secondary plus a stats block.
-            value = [
+            let stats: [String: Any] = [
+                "cache_entries": 0, "cache_hits": 0, "cache_misses": 0, "queries_total": 0,
+            ]
+            let dns: [String: Any] = [
                 "mode": (data["dns_mode"] as? String == "auto") ? "automatic" : "manual",
                 "primary": data["prefer_dns_manual"] as? String ?? "",
                 "secondary": data["standby_dns_manual"] as? String ?? "",
                 "proxy_running": false,
                 "doh_url": "",
-                "stats": ["cache_entries": 0, "cache_hits": 0, "cache_misses": 0, "queries_total": 0],
+                "stats": stats,
             ]
+            value = dns
         case "/api/network/lan-status":
             // `/api/router/lan` carries the address as plain fields; the app reads
             // the ubus shape, so it is rebuilt here.
-            value = [
+            let lanStatus: [String: Any] = [
                 "up": true,
                 "ipv4-address": [[
                     "address": data["ipaddr"] as? String ?? "",
                     "mask": data["netmask"] as? String ?? "",
                 ]],
             ]
+            value = lanStatus
 
         // MARK: eSIM
         case "/api/esim/profiles":
