@@ -23,9 +23,6 @@ enum AgentCompat {
         case "/api/device/thermal": return "/api/device/thermal/all"
         case "/api/network/clients": return "/api/network/clients"
         case "/api/network/lan-status", "/api/router/lan": return "/api/router/lan"
-        case "/api/router/apn/auto-profiles":
-            // This firmware has one profile list; the app shows it in both tabs.
-            value = data
         case "/api/dns/status": return "/api/router/dns"
         case "/api/router/apn/auto-profiles": return "/api/router/apn/profiles"
         case "/api/esim/profiles", "/api/esim/chip", "/api/esim/notifications":
@@ -116,6 +113,9 @@ enum AgentCompat {
                 "dhcp_lease_time": String(int(data["lease_seconds"], default: 0)),
             ]
             value = lan
+        case "/api/router/apn/auto-profiles":
+            // This firmware has one profile list; the app shows it in both tabs.
+            value = data
         case "/api/dns/status":
             // `/api/router/dns` uses dns_mode/prefer_dns_manual; the DNS screen
             // expects mode/primary/secondary plus a stats block.
