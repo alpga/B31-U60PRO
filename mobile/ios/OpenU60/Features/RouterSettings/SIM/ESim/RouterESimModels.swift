@@ -1,0 +1,328 @@
+import Foundation
+
+/// One profile on the eSIM in the router (GET /api/esim/profiles).
+struct RouterESimProfile: Identifiable, Equatable {
+    let iccid: String
+    let provider: String
+    let name: String
+    let nickname: String
+    let isEnabled: Bool
+    let profileClass: String
+    /// Codes for what may go wrong after switching to this profile (`manual_apn`,
+    /// `roaming_off`); the agent sends them only for profiles that can be switched to.
+    var switchWarnings: [String] = []
+
+    var id: String { iccid }
+
+    /// The nickname when set, otherwise the operator's profile name.
+    var displayName: String {
+        if !nickname.isEmpty { return nickname }
+        return name.isEmpty ? provider : name
+    }
+
+    /// Only ordinary operator profiles can be switched to (the agent refuses test profiles).
+    var canEnable: Bool { !isEnabled && profileClass == "operational" }
+}
+
+/// Identity and capacity of the eSIM chip (GET /api/esim/chip).
+struct RouterESimChip: Equatable {
+    var eid: String = ""
+    var firmware: String = ""
+    var freeMemoryBytes: Int?
+
+    static let empty = RouterESimChip()
+}
+
+/// The router's manual APN while manual APN mode is on (`manual_apn` on GET /api/esim/profiles).
+struct RouterESimManualAPN: Equatable {
+    var name: String
+    var apn: String
+}
+
+/// GET /api/esim/profiles: the list plus how fresh it is. While a switch reloads the SIM, or
+/// another eSIM operation holds the card, the agent answers with its last good list marked
+/// `updating`; a failed read returns that list as `stale` with `error`.
+struct RouterESimInventory: Equatable {
+    var profiles: [RouterESimProfile] = []
+    var observedAt: UInt64 = 0
+    /// Counts the agent's card reads. Unlike `observedAt` it never follows the router's clock,
+    /// which jumps hours when the modem first attaches.
+    var observedSeq: UInt64 = 0
+    var generation: UInt64 = 0
+    var agentInstance: UInt64 = 0
+    var updating = false
+    var stale = false
+    var errorKind: String?
+    var errorMessage: String?
+    var pendingReceipts: Int?
+    var manualAPN: RouterESimManualAPN?
+
+    /// True when this answer predates the one on screen (same agent run, older change counter
+    /// or older read) and must be ignored. Answers from older agents carry no counters, and
+    /// read times are compared only when either side lacks the read counter.
+    func isOlder(than shown: RouterESimInventory) -> Bool {
+        guard agentInstance != 0, agentInstance == shown.agentInstance else { return false }
+        if generation != shown.generation { return generation < shown.generation }
+        if observedSeq != 0, shown.observedSeq != 0 { return observedSeq < shown.observedSeq }
+        return observedAt < shown.observedAt
+    }
+
+    /// Text for a failed read; `nil` when the list is current.
+    var errorText: String? {
+        guard let errorMessage else { return nil }
+        switch errorKind {
+        case "sim_reloading": return "切换后 eSIM 仍在准备中。"
+        case "management_unavailable": return "eSIM 的管理程序没有响应（\(errorMessage)）。"
+        default: return errorMessage
+        }
+    }
+}
+
+extension RouterESimInventory {
+    /// Advisory sentences for the switch dialog, from the codes this list carries for `target`.
+    /// Codes this app doesn't know are skipped.
+    func switchWarnings(for target: RouterESimProfile) -> [String] {
+        let codes = profiles.first(where: { $0.iccid == target.iccid })?.switchWarnings ?? target.switchWarnings
+        let name = target.displayName
+        return codes.compactMap { code in
+            switch code {
+            case "manual_apn":
+                guard let apn = manualAPN?.apn else { return nil }
+                return "路由器设置为手动 APN“\(apn)”。如果 \(name) 需要不同的 APN，请在切换后前往“移动网络”修改，否则可能无法使用数据。"
+            case "roaming_off":
+                return "\(name) 看起来是旅行（漫游）配置，而数据漫游已关闭，因此在开启数据漫游前将无法使用数据。"
+            default:
+                return nil
+            }
+        }
+    }
+}
+
+/// GET /api/esim/switch: the agent's verified progress of the last switch.
+struct RouterESimSwitchStatus: Decodable, Equatable {
+    var state: String = "idle"
+    var targetICCID: String?
+    var generation: UInt64?
+    var startedAt: UInt64?
+    var finishedAt: UInt64?
+    var note: String?
+    /// Why data didn't connect, when the router knows: `roaming_off` or `data_off`.
+    var reason: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case state, generation, note, reason
+        case targetICCID = "target_iccid"
+        case startedAt = "started_at"
+        case finishedAt = "finished_at"
+    }
+
+    var isRunning: Bool { ["card_busy", "reloading", "card_confirmed", "modem_confirmed"].contains(state) }
+
+    /// The card is confirmed: a list read now shows the new active profile.
+    var cardConfirmed: Bool { !["idle", "card_busy", "reloading", "card_unconfirmed"].contains(state) }
+
+    var phase: RouterESimConnectionPhase {
+        switch state {
+        case "card_busy": .switching
+        case "reloading": .reloading
+        case "card_confirmed", "modem_confirmed": .registering
+        case "connected": .connected
+        case "no_data", "modem_unconfirmed", "card_unconfirmed": .waiting
+        case "not_applied": .unavailable
+        default: .checking
+        }
+    }
+
+    /// Shown while the switch runs: the eSIM refused for now and the router keeps trying.
+    var progressNote: String? {
+        state == "card_busy" ? "eSIM 忙，暂时拒绝了切换。路由器会继续尝试，最长 4 分钟。" : nil
+    }
+
+    /// Why a finished switch did not reach `connected`.
+    var outcomeNote: String? {
+        switch state {
+        case "no_data":
+            switch reason {
+            case "roaming_off": "此配置会在本地网络漫游，而数据漫游已关闭。请在“移动网络”中开启数据漫游。"
+            case "data_off": "配置已启用，但移动数据已关闭。请在“移动网络”中开启。"
+            default: "配置已启用，但移动数据尚未连接。请检查套餐或信号覆盖。"
+            }
+        case "modem_unconfirmed": "eSIM 已切换，但路由器仍在使用之前的 SIM。请重启路由器以完成切换。"
+        case "card_unconfirmed": "切换后无法读取 eSIM。请稍后刷新。"
+        case "not_applied":
+            reason == "card_busy"
+                ? "eSIM 一直忙，未能切换；之前的配置仍处于启用状态。请几分钟后重试。"
+                : "切换未发生；之前的配置仍处于启用状态。"
+        default: nil
+        }
+    }
+}
+
+enum RouterESimParser {
+    static func parseInventory(_ data: [String: Any]) -> RouterESimInventory {
+        let error = data["error"] as? [String: Any]
+        return RouterESimInventory(
+            profiles: parseProfiles(data),
+            observedAt: asUInt64(data["observed_at"]),
+            observedSeq: asUInt64(data["observed_seq"]),
+            generation: asUInt64(data["generation"]),
+            agentInstance: asUInt64(data["agent_instance"]),
+            updating: data["updating"] as? Bool ?? false,
+            stale: data["stale"] as? Bool ?? false,
+            errorKind: error?["kind"] as? String,
+            errorMessage: error?["message"] as? String,
+            pendingReceipts: asInt(data["pending_receipts"]),
+            manualAPN: parseManualAPN(data["manual_apn"])
+        )
+    }
+
+    static func parseProfiles(_ data: [String: Any]) -> [RouterESimProfile] {
+        guard let items = data["profiles"] as? [[String: Any]] else { return [] }
+        return items.compactMap { item in
+            guard let iccid = item["iccid"] as? String, !iccid.isEmpty else { return nil }
+            return RouterESimProfile(
+                iccid: iccid,
+                provider: item["provider"] as? String ?? "",
+                name: item["name"] as? String ?? "",
+                nickname: item["nickname"] as? String ?? "",
+                isEnabled: (item["state"] as? String) == "enabled",
+                profileClass: item["class"] as? String ?? "",
+                switchWarnings: (item["switch_warnings"] as? [Any])?.compactMap { $0 as? String } ?? []
+            )
+        }
+    }
+
+    /// `null` (manual APN mode off) and older agents both read as `nil`.
+    static func parseManualAPN(_ value: Any?) -> RouterESimManualAPN? {
+        guard let item = value as? [String: Any] else { return nil }
+        return RouterESimManualAPN(name: item["name"] as? String ?? "", apn: item["apn"] as? String ?? "")
+    }
+
+    static func parseChip(_ data: [String: Any]) -> RouterESimChip {
+        RouterESimChip(
+            eid: data["eid"] as? String ?? "",
+            firmware: data["firmware"] as? String ?? "",
+            freeMemoryBytes: asInt(data["free_nvm_bytes"])
+        )
+    }
+
+    private static func asUInt64(_ value: Any?) -> UInt64 {
+        if let n = value as? NSNumber { return n.uint64Value }
+        if let s = value as? String { return UInt64(s) ?? 0 }
+        return 0
+    }
+
+    private static func asInt(_ value: Any?) -> Int? {
+        if let i = value as? Int { return i }
+        if let d = value as? Double { return Int(d) }
+        if let s = value as? String { return Int(s) }
+        return nil
+    }
+}
+
+/// Screen-only connection state, separate from whether a profile is active on the card.
+enum RouterESimConnectionPhase: String, Equatable {
+    case checking, disconnected, switching, reloading, registering, connected, waiting, unavailable
+
+    var blocksSwitching: Bool { self == .switching || self == .reloading || self == .registering }
+}
+
+/// The modem's connection response can be cached for 30 seconds. Never mistake the previous
+/// profile's cached connection for recovery: require the new SIM identity plus a disconnect,
+/// or an expired cache window, and two connected observations.
+struct RouterESimReconnectTracker {
+    let targetICCID: String
+    private var sawDisconnect = false
+    private var connectedObservations = 0
+
+    init(targetICCID: String) { self.targetICCID = targetICCID }
+
+    static func isConnected(_ status: String) -> Bool {
+        ["connected", "ipv4_connected", "ipv6_connected", "ipv4_ipv6_connected"]
+            .contains(status.lowercased().trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    mutating func phase(simICCID: String, status: String, elapsed: TimeInterval) -> RouterESimConnectionPhase {
+        let connected = Self.isConnected(status)
+        if !status.isEmpty && !connected { sawDisconnect = true }
+        let matches = !simICCID.isEmpty && normalized(simICCID) == normalized(targetICCID)
+        if matches && connected && (sawDisconnect || elapsed >= 35) {
+            connectedObservations += 1
+            if connectedObservations >= 2 { return .connected }
+        } else {
+            connectedObservations = 0
+        }
+        if elapsed >= 120 { return .waiting }
+        return matches ? .registering : .reloading
+    }
+
+    private func normalized(_ value: String) -> String {
+        var result = value.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if result.hasSuffix("F") { result.removeLast() }
+        return result
+    }
+}
+
+/// Kept only in the add screen's memory. Never persist or log activation codes.
+struct RouterESimActivationCode {
+    let value: String
+    let server: String
+    let needsConfirmationCode: Bool
+
+    static let invalidMessage = "此二维码不是 eSIM 激活码。"
+
+    static func parse(_ input: String) -> Self? {
+        let code = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard code.utf8.count <= 512, code.lowercased().hasPrefix("lpa:"),
+              !code.unicodeScalars.contains(where: { CharacterSet.whitespacesAndNewlines.union(.controlCharacters).contains($0) }) else { return nil }
+        let parts = code.dropFirst(4).split(separator: "$", omittingEmptySubsequences: false).map(String.init)
+        guard (3...5).contains(parts.count), parts[0] == "1", !parts[1].isEmpty,
+              parts[1].utf8.allSatisfy({ asciiAlphanumeric($0) || [46, 45, 58].contains($0) }),
+              parts[2].utf8.allSatisfy({ asciiAlphanumeric($0) || $0 == 45 }) else { return nil }
+        return Self(value: "LPA:" + code.dropFirst(4), server: parts[1],
+                    needsConfirmationCode: parts.count == 5 && parts[4] == "1")
+    }
+
+    static func validConfirmationCode(_ code: String) -> Bool {
+        !code.isEmpty && code.utf8.count <= 64 && !code.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+    }
+
+    private static func asciiAlphanumeric(_ byte: UInt8) -> Bool {
+        (48...57).contains(byte) || (65...90).contains(byte) || (97...122).contains(byte)
+    }
+}
+
+struct RouterESimDownloadStatus: Decodable, Equatable {
+    var state: String = "idle"
+    var step: String?
+    var provider: String?
+    var name: String?
+    var iccid: String?
+    var error: String?
+    var startedAt: UInt64?
+    var finishedAt: UInt64?
+
+    private enum CodingKeys: String, CodingKey {
+        case state, step, provider, name, iccid, error
+        case startedAt = "started_at"
+        case finishedAt = "finished_at"
+    }
+
+    var isBusy: Bool { ["running", "confirm", "cancelling"].contains(state) }
+    var canCancel: Bool { ["running", "confirm"].contains(state) && step != "es10b_load_bound_profile_package" }
+    var displayName: String { [provider, name].compactMap { $0 }.first(where: { !$0.isEmpty }) ?? "eSIM 配置" }
+    var progressText: String {
+        if state == "confirm" { return "可以安装" }
+        if state == "cancelling" || step?.hasSuffix("_cancel_session") == true { return "正在取消…" }
+        if state == "done" { return "\(displayName) 已添加。" }
+        if state == "failed" { return "无法添加配置" }
+        if state == "cancelled" { return "下载已取消" }
+        switch step {
+        case "es9p_initiate_authentication", "es10b_authenticate_server", "es9p_authenticate_client": return "正在连接运营商…"
+        case "es8p_metadata_parse": return "正在读取配置详情…"
+        case "es10b_prepare_download", "es9p_get_bound_profile_package": return "正在下载配置…"
+        case "es10b_load_bound_profile_package": return "正在安装到 eSIM…"
+        default: return "正在准备 eSIM…"
+        }
+    }
+}

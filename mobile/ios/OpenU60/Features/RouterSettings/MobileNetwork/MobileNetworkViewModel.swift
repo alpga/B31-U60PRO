@@ -1,0 +1,305 @@
+import SwiftUI
+
+@Observable
+@MainActor
+final class MobileNetworkViewModel {
+    var config: MobileNetworkConfig = .empty
+    var isLoading: Bool = true
+    var message: String?
+    var messageIsError: Bool = false
+    var isScanning: Bool = false
+    var airplaneModeEnabled: Bool = false
+    var showRebootAfterAirplaneOff: Bool = false
+
+    var selectedConnectMode: Int = 1
+    var selectedRoaming: Bool = false
+    var selectedDataEnabled: Bool = false
+    var selectedNetSelectMode: String = "auto_select"
+
+    private var airplaneModeLoaded: Bool = false
+    private var initialLoadDone: Bool = false
+    private let client: AgentClient
+    private let authManager: AuthManager
+
+    init(client: AgentClient, authManager: AuthManager) {
+        self.client = client
+        self.authManager = authManager
+    }
+
+    var hasChanges: Bool {
+        selectedConnectMode != config.connectMode
+            || selectedRoaming != config.isRoamingEnabled
+            || selectedNetSelectMode != config.netSelectMode
+    }
+
+    // MARK: - Refresh
+
+    func refresh() async {
+        isLoading = true
+        message = nil
+
+        await fetchAirplaneMode()
+
+        do {
+            async let wwanCall = client.getJSON("/api/modem/data")
+            async let netInfoCall = client.getJSON("/api/network/signal")
+
+            let wwanData = try await wwanCall
+            let netInfoData = try await netInfoCall
+
+            let wwan = MobileNetworkParser.parseWWAN(wwanData)
+            let netSelectMode = MobileNetworkParser.parseNetInfo(netInfoData)
+
+            config = MobileNetworkConfig(
+                connectMode: wwan.connectMode,
+                roamEnable: wwan.roamEnable,
+                dataEnabled: wwan.dataEnabled,
+                connectStatus: wwan.connectStatus,
+                netSelectMode: netSelectMode,
+                operators: config.operators,
+                scanStatus: config.scanStatus
+            )
+            if !initialLoadDone {
+                selectedConnectMode = config.connectMode
+                selectedRoaming = config.isRoamingEnabled
+                selectedDataEnabled = config.isDataEnabled || config.isConnected
+                selectedNetSelectMode = config.netSelectMode
+                initialLoadDone = true
+            }
+        } catch {
+            showMessage("加载失败：\(error.localizedDescription)", isError: true)
+        }
+
+        isLoading = false
+    }
+
+    // MARK: - Mobile Data (immediate)
+
+    func setMobileData(enabled: Bool) async {
+        isLoading = true
+        do {
+            var params: [String: Any] = [
+                "cid": 1,
+                "connect_mode": enabled ? 1 : config.connectMode,
+                "roam_enable": config.roamEnable,
+                "enable": enabled ? 1 : 0
+            ]
+            if !enabled {
+                params["connect_status"] = "disconnected"
+            }
+            let _ = try await client.putJSON("/api/modem/data", body: params)
+            config.dataEnabled = enabled ? 1 : 0
+
+            // Poll to confirm the state actually changed
+            for _ in 0..<3 {
+                try? await Task.sleep(for: .seconds(2))
+                let wwanData = try await client.getJSON("/api/modem/data")
+                let wwan = MobileNetworkParser.parseWWAN(wwanData)
+                config.connectStatus = wwan.connectStatus
+                let connected = wwan.connectStatus.contains("connected")
+                if enabled == connected {
+                    showMessage(enabled ? "移动数据已开启" : "移动数据已关闭", isError: false)
+                    isLoading = false
+                    return
+                }
+            }
+            if enabled {
+                showMessage("移动数据已开启（连接仍在建立）", isError: false)
+            } else {
+                showMessage("移动数据已关闭（连接可能仍在断开）", isError: false)
+            }
+        } catch {
+            selectedDataEnabled = !enabled
+            showMessage("失败：\(error.localizedDescription)", isError: true)
+        }
+        isLoading = false
+    }
+
+    // MARK: - Apply Connection Settings
+
+    func applySettings() async {
+        isLoading = true
+
+        do {
+            if selectedConnectMode != config.connectMode || selectedRoaming != config.isRoamingEnabled {
+                let _ = try await client.putJSON("/api/modem/data", body: config.connectionBody(
+                    connectMode: selectedConnectMode,
+                    roaming: selectedRoaming
+                ))
+                if selectedRoaming && !config.isRoamingEnabled {
+                    config.dataEnabled = 1
+                    selectedDataEnabled = true
+                }
+            }
+
+            if selectedNetSelectMode != config.netSelectMode {
+                if selectedNetSelectMode == "auto_select" {
+                    let _ = try await client.putJSON("/api/modem/network-mode", body: ["net_select_mode": "auto_select"])
+                }
+            }
+
+            // Poll to confirm
+            for _ in 0..<5 {
+                try? await Task.sleep(for: .seconds(2))
+                let wwanData = try await client.getJSON("/api/modem/data")
+                let wwan = MobileNetworkParser.parseWWAN(wwanData)
+                if wwan.connectMode == selectedConnectMode && (wwan.roamEnable != 0) == selectedRoaming {
+                    config.connectMode = wwan.connectMode
+                    config.roamEnable = wwan.roamEnable
+                    config.connectStatus = wwan.connectStatus
+                    config.netSelectMode = selectedNetSelectMode
+                    showMessage("设置已应用", isError: false)
+                    isLoading = false
+                    return
+                }
+            }
+
+            config.connectMode = selectedConnectMode
+            config.roamEnable = selectedRoaming ? 1 : 0
+            config.netSelectMode = selectedNetSelectMode
+            showMessage("设置已发送——路由器可能仍在应用", isError: false)
+        } catch {
+            showMessage("失败：\(error.localizedDescription)", isError: true)
+        }
+
+        isLoading = false
+    }
+
+    // MARK: - Network Scan
+
+    func scanNetworks() async {
+        isScanning = true
+        config.operators = []
+        config.scanStatus = "scanning"
+        message = nil
+
+        do {
+            let _ = try await client.postJSON("/api/modem/scan")
+
+            for _ in 0..<30 {
+                try? await Task.sleep(for: .seconds(2))
+                let statusData = try await client.getJSON("/api/modem/scan/status")
+                let status = MobileNetworkParser.parseScanStatus(statusData)
+                if status == "done" || status == "complete" || status == "2" {
+                    let resultsData = try await client.getJSON("/api/modem/scan/results")
+                    config.operators = MobileNetworkParser.parseScanResults(resultsData)
+                    config.scanStatus = "done"
+                    isScanning = false
+                    return
+                }
+            }
+
+            config.scanStatus = ""
+            showMessage("扫描超时", isError: true)
+        } catch {
+            config.scanStatus = ""
+            showMessage("扫描失败：\(error.localizedDescription)", isError: true)
+        }
+
+        isScanning = false
+    }
+
+    // MARK: - Manual Register
+
+    func registerNetwork(mccMnc: String, rat: String) async {
+        isLoading = true
+
+        do {
+            let _ = try await client.postJSON("/api/modem/register", body: ["m_mcc_mnc": mccMnc, "m_rat": rat])
+
+            for _ in 0..<15 {
+                try? await Task.sleep(for: .seconds(2))
+                let resultData = try await client.getJSON("/api/modem/register/result")
+                let result = MobileNetworkParser.parseRegisterResult(resultData)
+                if result == "success" || result == "1" {
+                    config.netSelectMode = "manual_select"
+                    selectedNetSelectMode = "manual_select"
+                    showMessage("已注册到网络", isError: false)
+                    isLoading = false
+                    return
+                } else if result == "fail" || result == "0" {
+                    showMessage("注册失败", isError: true)
+                    isLoading = false
+                    return
+                }
+            }
+
+            showMessage("注册超时", isError: true)
+        } catch {
+            showMessage("失败：\(error.localizedDescription)", isError: true)
+        }
+
+        isLoading = false
+    }
+
+    // MARK: - Airplane Mode
+
+    private func fetchAirplaneMode() async {
+        do {
+            let data = try await client.getJSON("/api/modem/status")
+            let mode = data["operate_mode"] as? String ?? ""
+            if !mode.isEmpty {
+                let newAirplane = (mode != "ONLINE")
+                if newAirplane != airplaneModeEnabled { airplaneModeEnabled = newAirplane }
+            }
+            airplaneModeLoaded = true
+        } catch {
+            showMessage("加载飞行模式状态失败", isError: true)
+        }
+    }
+
+    func setAirplaneMode(enabled: Bool) async {
+        guard airplaneModeLoaded else { return }
+        isLoading = true
+        do {
+            if enabled {
+                let _ = try await client.postJSON("/api/modem/airplane", body: ["operate_mode": "LPM"])
+                showMessage("飞行模式已开启——蜂窝无线电已关闭", isError: false)
+            } else {
+                var succeeded = false
+                for attempt in 1...2 {
+                    do {
+                        let _ = try await client.postJSON("/api/modem/online")
+                        succeeded = true
+                        break
+                    } catch {
+                        if attempt == 1 {
+                            try await Task.sleep(for: .seconds(3))
+                        }
+                    }
+                }
+                if !succeeded {
+                    throw NSError(domain: "", code: -1, userInfo: [NSLocalizedDescriptionKey: "重试后调制解调器仍未能上线"])
+                }
+                showMessage("飞行模式已关闭——信号正在恢复…", isError: false)
+                try? await Task.sleep(for: .seconds(2))
+                await refresh()
+            }
+        } catch {
+            if !enabled {
+                airplaneModeEnabled = true
+                showRebootAfterAirplaneOff = true
+            } else {
+                airplaneModeEnabled = false
+            }
+            showMessage("失败：\(error.localizedDescription)", isError: true)
+        }
+        isLoading = false
+    }
+
+    func reboot() async {
+        isLoading = true
+        do {
+            let _ = try await client.postJSON("/api/device/reboot")
+            showMessage("路由器正在重启…", isError: false)
+        } catch {
+            showMessage("失败：\(error.localizedDescription)", isError: true)
+        }
+        isLoading = false
+    }
+
+    private func showMessage(_ text: String, isError: Bool) {
+        message = text
+        messageIsError = isError
+    }
+}

@@ -1,0 +1,73 @@
+import SwiftUI
+
+struct EnableADBView: View {
+    let client: AgentClient
+    let authManager: AuthManager
+
+    @State private var isLoading = false
+    @State private var resultMessage: String?
+    @State private var isError = false
+
+    var body: some View {
+        VStack(spacing: 24) {
+            Spacer()
+
+            Image(systemName: "cable.connector.horizontal")
+                .font(.system(size: 64))
+                .foregroundStyle(.blue)
+
+            Text("启用 ADB 调试")
+                .font(.title2.bold())
+
+            Text("将 USB 模式设为调试，从而可通过 USB-C 使用 ADB。")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 40)
+
+            if let msg = resultMessage {
+                Text(msg)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(isError ? .red : .green)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+            }
+
+            Button {
+                Task { await enableADB() }
+            } label: {
+                Group {
+                    if isLoading {
+                        ProgressView()
+                            .tint(.white)
+                    } else {
+                        Label("启用 ADB", systemImage: "power")
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 44)
+            }
+            .buttonStyle(.borderedProminent)
+            .padding(.horizontal, 40)
+            .disabled(isLoading)
+
+            Spacer()
+            Spacer()
+        }
+        .navigationTitle("启用 ADB")
+    }
+
+    private func enableADB() async {
+        isLoading = true
+        resultMessage = nil
+        do {
+            let _ = try await client.putJSON("/api/usb/mode", body: ["mode": "debug"])
+            resultMessage = "ADB 调试模式已启用。连接 USB-C 数据线即可访问设备。"
+            isError = false
+        } catch {
+            resultMessage = "失败：\(error.localizedDescription)"
+            isError = true
+        }
+        isLoading = false
+    }
+}

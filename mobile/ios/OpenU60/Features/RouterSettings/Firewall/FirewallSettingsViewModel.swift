@@ -1,0 +1,256 @@
+import SwiftUI
+
+@Observable
+@MainActor
+final class FirewallSettingsViewModel {
+    var config: FirewallConfig = .empty
+    var portForwardRules: [PortForwardRule] = []
+    var filterRules: [FilterRule] = []
+    var upnpEnabled: Bool = false
+    var isLoading: Bool = false
+    var message: String?
+    var messageIsError: Bool = false
+    var showAddPortForward: Bool = false
+
+    // DMZ edit fields
+    var editDmzEnabled: Bool = false
+    var editDmzIP: String = ""
+
+    private let client: AgentClient
+    private let authManager: AuthManager
+
+    /// `FirewallParser` falls back to the array index when the router omits a rule id, so a local
+    /// list that has drifted out of sync makes a delete act on whatever rule now sits at that
+    /// index. Set whenever a mutation lands but the follow-up list read fails.
+    private var portForwardListIsStale: Bool = false
+
+    init(client: AgentClient, authManager: AuthManager) {
+        self.client = client
+        self.authManager = authManager
+    }
+
+    func refresh() async {
+        isLoading = true
+        message = nil
+
+        do {
+            let data = try await client.getJSON("/api/router/firewall")
+            config = FirewallParser.parseConfig(data)
+            editDmzEnabled = config.dmzEnabled
+            editDmzIP = config.dmzHost
+
+            async let pfResult = fetchPortForwardRules()
+            async let filterResult = fetchFilterRules()
+            async let upnpResult = fetchUPnP()
+
+            let rules = await pfResult
+            portForwardRules = rules ?? []
+            portForwardListIsStale = rules == nil
+            filterRules = await filterResult
+            upnpEnabled = await upnpResult
+        } catch {
+            if !error.isCancellation {
+                showMessage("加载防火墙设置失败：\(error.localizedDescription)", isError: true)
+            }
+        }
+
+        isLoading = false
+    }
+
+    /// Returns `nil` when the list could not be fetched, so callers can tell "no rules" apart
+    /// from "we don't know".
+    private func fetchPortForwardRules() async -> [PortForwardRule]? {
+        do {
+            let data = try await client.getJSON("/api/router/firewall/port-forward")
+            return FirewallParser.parsePortForwardRules(data)
+        } catch {
+            return nil
+        }
+    }
+
+    /// Replaces the local rules with the router's so every id is re-derived after a mutation.
+    /// Returns `false` when the list could not be read, leaving the local ids marked stale.
+    private func reloadPortForwardRules() async -> Bool {
+        guard let refreshed = await fetchPortForwardRules() else {
+            portForwardListIsStale = true
+            return false
+        }
+        portForwardRules = refreshed
+        portForwardListIsStale = false
+        return true
+    }
+
+    private func fetchFilterRules() async -> [FilterRule] {
+        do {
+            let data = try await client.getJSON("/api/router/firewall/filter-rules")
+            return FirewallParser.parseFilterRules(data)
+        } catch {
+            return []
+        }
+    }
+
+    private func fetchUPnP() async -> Bool {
+        do {
+            let data = try await client.getJSON("/api/router/firewall/upnp")
+            if let str = data["upnp_switch"] as? String {
+                return str == "1"
+            }
+            return false
+        } catch {
+            return false
+        }
+    }
+
+    func toggleFirewall(enabled: Bool) async {
+        isLoading = true
+        do {
+            let _ = try await client.putJSON("/api/router/firewall/switch", body: ["firewall_switch": enabled ? "1" : "0"])
+            showMessage("防火墙已\(enabled ? "启用" : "停用")", isError: false)
+            config.enabled = enabled
+        } catch {
+            showMessage("失败：\(error.localizedDescription)", isError: true)
+        }
+        isLoading = false
+    }
+
+    func setLevel(_ level: String) async {
+        isLoading = true
+        do {
+            let _ = try await client.putJSON("/api/router/firewall/level", body: ["firewall_level": level])
+            showMessage("防火墙级别已设为 \(level)", isError: false)
+            config.level = level
+        } catch {
+            showMessage("失败：\(error.localizedDescription)", isError: true)
+        }
+        isLoading = false
+    }
+
+    func toggleNAT(enabled: Bool) async {
+        isLoading = true
+        do {
+            let _ = try await client.putJSON("/api/router/firewall/nat", body: ["nat_switch": enabled ? "1" : "0"])
+            showMessage("NAT 已\(enabled ? "启用" : "停用")", isError: false)
+            config.nat = enabled
+        } catch {
+            showMessage("失败：\(error.localizedDescription)", isError: true)
+        }
+        isLoading = false
+    }
+
+    func toggleUPnP(enabled: Bool) async {
+        isLoading = true
+        do {
+            let _ = try await client.putJSON("/api/router/firewall/upnp", body: ["upnp_switch": enabled ? "1" : "0"])
+            showMessage("UPnP 已\(enabled ? "启用" : "停用")", isError: false)
+            upnpEnabled = enabled
+        } catch {
+            showMessage("失败：\(error.localizedDescription)", isError: true)
+        }
+        isLoading = false
+    }
+
+    func applyDMZ() async {
+        isLoading = true
+        do {
+            let _ = try await client.putJSON("/api/router/firewall/dmz", body: [
+                "dmz_enabled": editDmzEnabled ? "1" : "0",
+                "dmz_ip": editDmzIP
+            ])
+            showMessage("DMZ 设置已更新", isError: false)
+            config.dmzEnabled = editDmzEnabled
+            config.dmzHost = editDmzIP
+        } catch {
+            showMessage("失败：\(error.localizedDescription)", isError: true)
+        }
+        isLoading = false
+    }
+
+    func togglePortForward(enabled: Bool) async {
+        isLoading = true
+        do {
+            let _ = try await client.putJSON("/api/router/firewall/port-forward/switch", body: ["port_forward_switch": enabled ? "1" : "0"])
+            showMessage("端口转发已\(enabled ? "启用" : "停用")", isError: false)
+            config.portForwardEnabled = enabled
+        } catch {
+            showMessage("失败：\(error.localizedDescription)", isError: true)
+        }
+        isLoading = false
+    }
+
+    func addPortForward(name: String, protocol_: String, wanPort: String, lanIP: String, lanPort: String) async {
+        isLoading = true
+        do {
+            let _ = try await client.postJSON("/api/router/firewall/port-forward", body: [
+                "action": "add",
+                "name": name,
+                "protocol": protocol_,
+                "wan_port": wanPort,
+                "lan_ip": lanIP,
+                "lan_port": lanPort,
+                "enabled": "1"
+            ])
+            showAddPortForward = false
+            // Re-read the list so the new row carries the router's own id. A client-side id would
+            // make a later delete a no-op on the router and silently leave the WAN port open.
+            if await reloadPortForwardRules() {
+                showMessage("端口转发规则已添加", isError: false)
+            } else {
+                // The router accepted the rule, so show it rather than let it vanish. Its id is a
+                // placeholder the router would not recognise, which is why `deletePortForward`
+                // re-reads the list before acting on a stale one.
+                portForwardRules.append(PortForwardRule(
+                    id: "pending-\(UUID().uuidString)",
+                    name: name,
+                    protocol_: protocol_,
+                    wanPort: wanPort,
+                    lanIP: lanIP,
+                    lanPort: lanPort,
+                    enabled: true
+                ))
+                showMessage("规则已添加，但列表无法重新加载。请下拉刷新。", isError: true)
+            }
+        } catch {
+            showMessage("失败：\(error.localizedDescription)", isError: true)
+        }
+        isLoading = false
+    }
+
+    func deletePortForward(_ rule: PortForwardRule) async {
+        isLoading = true
+
+        // Sending an id from a list we know is out of sync would delete whichever rule now sits at
+        // that index. Reload first and let the user re-pick from the authoritative list.
+        if portForwardListIsStale {
+            if await reloadPortForwardRules() {
+                showMessage("规则列表已过期并已重新加载，请重试。", isError: true)
+            } else {
+                showMessage("规则列表已过期且无法重新加载。请下拉刷新。", isError: true)
+            }
+            isLoading = false
+            return
+        }
+
+        do {
+            let _ = try await client.postJSON("/api/router/firewall/port-forward", body: [
+                "action": "delete",
+                "id": rule.id
+            ])
+            // Deleting shifts the remaining rules up, so ids derived from the array index no longer
+            // match. Re-read for the same reason the add path does.
+            if await reloadPortForwardRules() {
+                showMessage("端口转发规则已删除", isError: false)
+            } else {
+                portForwardRules.removeAll { $0.id == rule.id }
+                showMessage("规则已删除，但列表无法重新加载。请下拉刷新。", isError: true)
+            }
+        } catch {
+            showMessage("失败：\(error.localizedDescription)", isError: true)
+        }
+        isLoading = false
+    }
+
+    private func showMessage(_ text: String, isError: Bool) {
+        message = text
+        messageIsError = isError
+    }
+}
