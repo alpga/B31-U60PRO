@@ -38,10 +38,6 @@ struct ToolsListView: View {
                 }
 
                 Section("网络工具") {
-                    NavigationLink(value: Route.speedTest) {
-                        Label("网速测试", systemImage: "gauge.with.needle")
-                    }
-
                     NavigationLink(value: Route.lanSpeedTest) {
                         Label("局域网测速", systemImage: "wifi")
                     }

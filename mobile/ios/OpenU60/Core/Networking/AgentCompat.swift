@@ -19,15 +19,27 @@ import Foundation
 enum AgentCompat {
     /// Where the data for `path` comes from.
     static func source(for path: String) -> String {
-        path.hasPrefix("/api/esim") ? "/api/esim" : "/api/dashboard"
+        switch path {
+        case "/api/device/thermal": return "/api/device/thermal/all"
+        case "/api/network/clients": return "/api/network/clients"
+        case "/api/network/lan-status": return "/api/router/lan"
+        case "/api/esim/profiles", "/api/esim/chip", "/api/esim/notifications":
+            return "/api/esim"
+        default:
+            return "/api/dashboard"
+        }
     }
 
-    /// Paths answered by reshaping another endpoint's reply.
-    static func handles(_ path: String) -> Bool {
+    /// Paths answered by reshaping another endpoint's reply. Reads only: a write
+    /// must reach the agent, which is why the method is part of the question.
+    static func handles(_ path: String, method: String) -> Bool {
+        guard method == "GET" else { return false }
         switch path {
         case "/api/network/signal", "/api/network/wan", "/api/network/wan6",
-             "/api/network/traffic", "/api/device/system", "/api/device/thermal",
-             "/api/battery", "/api/modem/status",
+             "/api/network/traffic", "/api/network/clients", "/api/network/lan-status",
+             "/api/device/system", "/api/device/thermal", "/api/device/battery-info",
+             "/api/battery", "/api/modem/status", "/api/modem/data",
+             "/api/modem/network-mode",
              "/api/esim/profiles", "/api/esim/chip", "/api/esim/notifications":
             return true
         default:
@@ -71,7 +83,7 @@ enum AgentCompat {
         case "/api/network/wan6":
             value = data["wan6"] as? [String: Any] ?? [:]
         case "/api/device/thermal":
-            value = data["thermal"] as? [String: Any] ?? [:]
+            value = thermal(from: data)
         case "/api/network/traffic":
             value = traffic(from: data)
         case "/api/battery":
@@ -80,6 +92,22 @@ enum AgentCompat {
             value = system(from: data)
         case "/api/modem/status":
             value = modemStatus(from: data)
+        case "/api/modem/data":
+            value = modemData(from: data)
+        case "/api/modem/network-mode":
+            value = networkMode(from: data)
+        case "/api/network/clients":
+            value = hosts(from: data)
+        case "/api/network/lan-status":
+            // `/api/router/lan` carries the address as plain fields; the app reads
+            // the ubus shape, so it is rebuilt here.
+            value = [
+                "up": true,
+                "ipv4-address": [[
+                    "address": data["ipaddr"] as? String ?? "",
+                    "mask": data["netmask"] as? String ?? "",
+                ]],
+            ]
 
         // MARK: eSIM
         case "/api/esim/profiles":
@@ -125,6 +153,22 @@ enum AgentCompat {
         ]
     }
 
+    /// The detail sheet wants capacity, temperature and both ETAs: capacity and
+    /// temperature live in the dashboard, the ETAs only in the agent's own
+    /// battery-info reply, so the two are merged here.
+    static func batteryInfo(dashboard: Data, info: Data) throws -> Data {
+        var shaped = try JSONSerialization.jsonObject(with: body(for: "/api/battery", source: dashboard)) as? [String: Any] ?? [:]
+        var value = shaped["data"] as? [String: Any] ?? [:]
+        if let root = try JSONSerialization.jsonObject(with: info) as? [String: Any],
+           let detail = root["data"] as? [String: Any] {
+            if let full = detail["time_to_full_mins"] as? NSNumber { value["battery_time_to_full"] = full.intValue }
+            if let empty = detail["time_to_empty_mins"] as? NSNumber { value["battery_time_to_empty"] = empty.intValue }
+            if let online = detail["online"] as? Bool { value["online"] = online }
+        }
+        shaped["data"] = value
+        return try JSONSerialization.data(withJSONObject: shaped)
+    }
+
     /// `load` is fixed point (loadavg × 65536) and memory is bytes.
     private static func system(from data: [String: Any]) -> [String: Any] {
         let device = data["device"] as? [String: Any] ?? [:]
@@ -142,10 +186,79 @@ enum AgentCompat {
         ]
     }
 
+    /// The app shows "airplane mode" when the operating mode is not online, so the
+    /// answer must distinguish "no service" from "radio off": only an explicit
+    /// low-power mode counts as off.
     private static func modemStatus(from data: [String: Any]) -> [String: Any] {
         let signal = data["signal"] as? [String: Any] ?? [:]
-        let network = signal["network_type"] as? String ?? ""
-        return ["operate_mode": network.isEmpty ? "low_power" : "online"]
+        let mode = signal["domain_stat"] as? String ?? ""
+        let registered = !(signal["network_type"] as? String ?? "").isEmpty
+        let online = registered || mode != "NO_SERVICE"
+        // The app treats anything other than "ONLINE" as airplane mode, so the
+        // firmware's own vocabulary is used rather than a private one.
+        return [
+            "operate_mode": online ? "ONLINE" : "LPM",
+            "registered": registered,
+            "domain_stat": mode,
+        ]
+    }
+
+    /// `MobileNetworkParser.parseWWAN` reads connect_mode / roam_enable / enable /
+    /// connect_status; the dashboard's radio section carries the last of those.
+    private static func modemData(from data: [String: Any]) -> [String: Any] {
+        let signal = data["signal"] as? [String: Any] ?? [:]
+        let connected = !(signal["network_type"] as? String ?? "").isEmpty
+        return [
+            "connect_mode": 1,
+            "roam_enable": 0,
+            "enable": 1,
+            "connect_status": connected ? "connected" : "disconnected",
+            "network_type": signal["network_type"] ?? "",
+        ]
+    }
+
+    /// `parseNetInfo` only reads `net_select_mode`, which the netinfo reply has.
+    private static func networkMode(from data: [String: Any]) -> [String: Any] {
+        let signal = data["signal"] as? [String: Any] ?? [:]
+        return [
+            "net_select": signal["net_select"] ?? "",
+            "net_select_mode": signal["net_select_mode"] ?? "auto_select",
+            "m_netselect_status": "",
+            "m_netselect_contents": [],
+        ]
+    }
+
+    /// `DeviceParser.parseHostHints` wants `hosts[mac] = {name, ipaddrs}` and
+    /// `enrichWithDHCP` wants `[{macaddr, hostname}]`; the agent sends a flat list.
+    private static func hosts(from data: [String: Any]) -> [String: Any] {
+        let clients = data["clients"] as? [[String: Any]] ?? []
+        var hosts: [String: Any] = [:]
+        var leases: [[String: Any]] = []
+        for client in clients {
+            guard let mac = client["mac"] as? String, !mac.isEmpty else { continue }
+            let name = client["hostname"] as? String ?? ""
+            let ip = client["ip"] as? String ?? ""
+            hosts[mac] = ["name": name, "ipaddrs": ip.isEmpty ? [] : [ip], "ip6addrs": []]
+            leases.append(["macaddr": mac, "hostname": name])
+        }
+        return ["hosts": hosts, "dhcp_leases": leases]
+    }
+
+    /// `/api/device/thermal/all` already carries `cpu_0…3`, `battery` and the full
+    /// sensor list; the app wants a single `cpuss_temp` plus `sensors[]`.
+    private static func thermal(from data: [String: Any]) -> [String: Any] {
+        let cores = ["cpu_0", "cpu_1", "cpu_2", "cpu_3"].compactMap { key -> Double? in
+            guard let value = data[key] as? NSNumber else { return nil }
+            return value.doubleValue
+        }
+        var sensors = data["sensors"] as? [[String: Any]] ?? []
+        if let battery = data["battery"] as? NSNumber {
+            sensors.append(["id": "battery", "name": "battery", "temperature_c": battery.doubleValue])
+        }
+        var out: [String: Any] = ["sensors": sensors]
+        if let hottest = cores.max() { out["cpuss_temp"] = hottest }
+        if let battery = data["battery"] { out["battery_temp"] = battery }
+        return out
     }
 
     // MARK: - eSIM
@@ -176,9 +289,9 @@ enum AgentCompat {
         if let card = view["card"] as? String, card != "euicc" {
             let message: String
             switch card {
-            case "sim": message = "This is an ordinary SIM, not an eUICC"
-            case "absent": message = "No card in the slot"
-            default: message = view["detail"] as? String ?? "The card could not be read"
+            case "sim": message = "这是一张普通 SIM 卡，不是 eUICC"
+            case "absent": message = "卡槽里没有卡"
+            default: message = view["detail"] as? String ?? "读卡失败"
             }
             out["error"] = ["kind": card, "message": message]
         }
@@ -218,5 +331,21 @@ enum AgentCompat {
 
     private static func uint64(_ value: Any?) -> UInt64 {
         (value as? NSNumber)?.uint64Value ?? 0
+    }
+}
+
+/// One dashboard read serves every slice in a refresh tick: the app asks for eight
+/// of these paths per poll, and each used to cost its own aggregation on the
+/// router. A one-second window collapses them without making the UI stale.
+actor SourceSnapshot {
+    private var entries: [String: (at: Date, data: Data)] = [:]
+
+    func value(for path: String, ttl: TimeInterval) -> Data? {
+        guard let entry = entries[path], Date().timeIntervalSince(entry.at) < ttl else { return nil }
+        return entry.data
+    }
+
+    func store(_ data: Data, for path: String) {
+        entries[path] = (Date(), data)
     }
 }

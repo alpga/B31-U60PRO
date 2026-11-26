@@ -9,6 +9,8 @@ import Foundation
 @MainActor
 final class AgentClient {
     var baseURL: String
+    /// One dashboard read serves every compatibility slice in a poll tick.
+    private let sources = SourceSnapshot()
     var token: String?
 
     /// Invoked when a request comes back 401. Returning `true` means a fresh session was
@@ -192,16 +194,22 @@ final class AgentClient {
         body: Data?,
         authenticated: Bool = true,
         retryOnUnauthorized: Bool = true,
+        allowCompat: Bool = true,
         parse: @escaping @Sendable (Data) throws -> T
     ) async throws -> T {
-        // Paths the deployed agent publishes under another name are answered from
-        // the endpoint that does carry the data, so every caller keeps its shape.
-        if AgentCompat.handles(path) {
-            let source = try await send(method: "GET", path: AgentCompat.source(for: path), body: nil) { $0 }
+        // The battery detail needs two replies: capacity and temperature from the
+        // dashboard, the ETAs from the agent's own battery-info.
+        if allowCompat, method == "GET", path == "/api/device/battery-info" {
+            let dashboard = try await rawSource("/api/dashboard")
+            let info = try await rawSource("/api/device/battery-info")
+            return try parse(try AgentCompat.batteryInfo(dashboard: dashboard, info: info))
+        }
+        if allowCompat, AgentCompat.handles(path, method: method) {
+            let source = try await rawSource(AgentCompat.source(for: path))
             return try parse(try AgentCompat.body(for: path, source: source))
         }
         // Requests the agent takes on a different path, e.g. a profile switch.
-        if let moved = AgentCompat.translate(method: method, path: path, body: body) {
+        if allowCompat, let moved = AgentCompat.translate(method: method, path: path, body: body) {
             let reply = try await send(method: moved.method, path: moved.path, body: moved.body) { $0 }
             let shaped = (try? AgentCompat.body(for: path, source: reply)) ?? reply
             return try parse(shaped)
@@ -216,6 +224,15 @@ final class AgentClient {
             let retry = try makeRequest(method: method, path: path, body: body, authenticated: true)
             return try await AgentClient.perform(retry, on: session, parse: parse).value
         }
+    }
+
+    /// A reply straight from the agent, cached for a second so a poll tick costs
+    /// one read per source rather than one per caller.
+    private func rawSource(_ path: String) async throws -> Data {
+        if let cached = await sources.value(for: path, ttl: 1.0) { return cached }
+        let data = try await send(method: "GET", path: path, body: nil, allowCompat: false) { $0 }
+        await sources.store(data, for: path)
+        return data
     }
 
     private func makeRequest(method: String, path: String, body: Data?, authenticated: Bool) throws -> URLRequest {

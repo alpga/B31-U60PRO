@@ -52,12 +52,12 @@ final class SMSViewModel {
 
     private func fetchMessages() async -> [SMSMessage]? {
         do {
+            // The agent's list endpoint takes only page/per_page and rejects any
+            // other key, so the filters this build used to send are applied here
+            // instead of on the router.
             let data = try await client.postJSON("/api/sms/list", body: [
                 "page": 0,
-                "data_per_page": 500,
-                "mem_store": storageFilter.memStoreValue,
-                "tags": 10,
-                "order_by": "order by id desc"
+                "per_page": 500
             ])
             return await Self.parseMessagesOffMain(data)
         } catch {
