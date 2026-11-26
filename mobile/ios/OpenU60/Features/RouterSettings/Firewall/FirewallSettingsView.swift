@@ -54,6 +54,15 @@ struct FirewallSettingsView: View {
                 .disabled(viewModel.isLoading)
             }
 
+            Section("SIP ALG") {
+                Toggle("启用 SIP ALG", isOn: $viewModel.editSipAlg)
+                Button {
+                    Task { await viewModel.applySipAlg() }
+                } label: {
+                    Text("应用 SIP ALG")
+                }
+            }
+
             Section("DMZ") {
                 Toggle("启用 DMZ", isOn: $viewModel.editDmzEnabled)
                 if viewModel.editDmzEnabled {

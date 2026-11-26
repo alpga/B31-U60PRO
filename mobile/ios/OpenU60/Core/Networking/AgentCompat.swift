@@ -58,6 +58,19 @@ enum AgentCompat {
         path: String,
         body: Data?
     ) -> (method: String, path: String, body: Data?)? {
+        // The DNS screen posts its own vocabulary; the firmware takes dns_mode and
+        // the manual servers.
+        if method == "PUT", path == "/api/dns/apply", let body,
+           let request = try? JSONSerialization.jsonObject(with: body) as? [String: Any] {
+            let automatic = (request["mode"] as? String) == "automatic"
+            let mapped: [String: Any] = [
+                "dns_mode": automatic ? "auto" : "manual",
+                "prefer_dns_manual": automatic ? "" : (request["primary"] as? String ?? ""),
+                "standby_dns_manual": automatic ? "" : (request["secondary"] as? String ?? ""),
+            ]
+            guard let payload = try? JSONSerialization.data(withJSONObject: mapped) else { return nil }
+            return ("PUT", "/api/router/dns", payload)
+        }
         guard method == "POST", path == "/api/esim/enable", let body,
               let request = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
               let iccid = request["iccid"] as? String
@@ -90,7 +103,7 @@ enum AgentCompat {
         case "/api/network/traffic":
             value = traffic(from: data)
         case "/api/battery":
-            value = battery(from: data)
+            value = data["battery"] as? [String: Any] ?? [:]
         case "/api/device/system":
             value = system(from: data)
         case "/api/modem/status":
@@ -175,32 +188,38 @@ enum AgentCompat {
         ]]
     }
 
-    /// The kernel reports tenths of a degree; the app validates -40…150 °C.
+    /// `DeviceParser.parseBattery` reads the legacy `battery_*` names and expects
+    /// degrees Celsius; the dashboard reports tenths, so it is divided here.
     private static func battery(from data: [String: Any]) -> [String: Any] {
         let pack = data["battery"] as? [String: Any] ?? [:]
-        return [
+        let battery: [String: Any] = [
             "battery_capacity": int(pack["capacity"], default: -1),
             "battery_temperature": double(pack["temperature"]) / 10.0,
             "battery_time_to_full": -1,
             "battery_time_to_empty": -1,
             "battery_status": pack["status"] as? String ?? "",
         ]
+        return battery
     }
 
     /// The detail sheet wants capacity, temperature and both ETAs: capacity and
     /// temperature live in the dashboard, the ETAs only in the agent's own
     /// battery-info reply, so the two are merged here.
     static func batteryInfo(dashboard: Data, info: Data) throws -> Data {
-        var shaped = try JSONSerialization.jsonObject(with: body(for: "/api/battery", source: dashboard)) as? [String: Any] ?? [:]
-        var value = shaped["data"] as? [String: Any] ?? [:]
-        if let root = try JSONSerialization.jsonObject(with: info) as? [String: Any],
-           let detail = root["data"] as? [String: Any] {
-            if let full = detail["time_to_full_mins"] as? NSNumber { value["battery_time_to_full"] = full.intValue }
-            if let empty = detail["time_to_empty_mins"] as? NSNumber { value["battery_time_to_empty"] = empty.intValue }
-            if let online = detail["online"] as? Bool { value["online"] = online }
+        guard
+            let root = try JSONSerialization.jsonObject(with: dashboard) as? [String: Any],
+            let data = root["data"] as? [String: Any]
+        else {
+            throw AgentError.decodingError("dashboard has no data object")
         }
-        shaped["data"] = value
-        return try JSONSerialization.data(withJSONObject: shaped)
+        var value = battery(from: data)
+        if let detail = try JSONSerialization.jsonObject(with: info) as? [String: Any],
+           let payload = detail["data"] as? [String: Any] {
+            if let full = payload["time_to_full_mins"] as? NSNumber { value["battery_time_to_full"] = full.intValue }
+            if let empty = payload["time_to_empty_mins"] as? NSNumber { value["battery_time_to_empty"] = empty.intValue }
+            if let online = payload["online"] as? Bool { value["online"] = online }
+        }
+        return try JSONSerialization.data(withJSONObject: ["ok": true, "data": value])
     }
 
     /// `load` is fixed point (loadavg × 65536) and memory is bytes.

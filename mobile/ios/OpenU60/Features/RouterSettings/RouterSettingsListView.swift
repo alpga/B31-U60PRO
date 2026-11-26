@@ -98,7 +98,7 @@ struct RouterSettingsListView: View {
                     }
 
                     NavigationLink(value: Route.vpnPassthrough) {
-                        Label("VPN 透传", systemImage: "lock.shield")
+                        Label("VPN 客户端", systemImage: "lock.shield")
                     }
                 }
 

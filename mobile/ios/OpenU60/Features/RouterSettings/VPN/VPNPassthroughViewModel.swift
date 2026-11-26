@@ -1,16 +1,30 @@
 import SwiftUI
 
+/// The VPN client screen: the router's WireGuard state, read from `/api/wireguard`.
+///
+/// The passthrough switch that used to live here is a firewall setting on this
+/// firmware, so it now sits in the firewall screen next to DMZ.
 @Observable
 @MainActor
 final class VPNPassthroughViewModel {
-    var config: VPNPassthroughConfig = .empty
+    struct Status: Equatable {
+        var enabled = false
+        var connected = false
+        var endpoint = ""
+        var address = ""
+        var dns = ""
+        var handshake: UInt64 = 0
+        var rxBytes: UInt64 = 0
+        var txBytes: UInt64 = 0
+        var profiles: [String] = []
+
+        static let empty = Status()
+    }
+
+    var status: Status = .empty
     var isLoading: Bool = false
     var message: String?
     var messageIsError: Bool = false
-
-    /// This firmware exposes one passthrough flag — SIP ALG — so the screen
-    /// drives that single switch instead of three that do not exist.
-    var editSipAlg: Bool = false
 
     private let client: AgentClient
     private let authManager: AuthManager
@@ -25,28 +39,20 @@ final class VPNPassthroughViewModel {
         message = nil
 
         do {
-            let data = try await client.getJSON("/api/router/vpn")
-            config = VPNPassthroughParser.parse(data)
-            editSipAlg = (data["alg_sip_enable"] as? String) == "1"
-                || (data["alg_sip_enable"] as? Bool ?? false)
+            let data = try await client.getJSON("/api/wireguard")
+            status = Status(
+                enabled: data["enabled"] as? Bool ?? false,
+                connected: data["connected"] as? Bool ?? false,
+                endpoint: data["endpoint"] as? String ?? "",
+                address: data["address"] as? String ?? "",
+                dns: data["dns"] as? String ?? "",
+                handshake: (data["latest_handshake"] as? NSNumber)?.uint64Value ?? 0,
+                rxBytes: (data["rx_bytes"] as? NSNumber)?.uint64Value ?? 0,
+                txBytes: (data["tx_bytes"] as? NSNumber)?.uint64Value ?? 0,
+                profiles: (data["profiles"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String }
+            )
         } catch {
-            showMessage("加载 VPN 设置失败：\(error.localizedDescription)", isError: true)
-        }
-
-        isLoading = false
-    }
-
-    func apply() async {
-        isLoading = true
-
-        do {
-            let _ = try await client.putJSON("/api/router/vpn", body: [
-                "alg_sip_enable": editSipAlg ? "1" : "0"
-            ])
-            showMessage("VPN 透传设置已更新", isError: false)
-            config = VPNPassthroughConfig(l2tp: editSipAlg, pptp: editSipAlg, ipsec: editSipAlg)
-        } catch {
-            showMessage("失败：\(error.localizedDescription)", isError: true)
+            showMessage("加载 VPN 状态失败：\(error.localizedDescription)", isError: true)
         }
 
         isLoading = false

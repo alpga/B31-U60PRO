@@ -13,6 +13,9 @@ final class FirewallSettingsViewModel {
     var showAddPortForward: Bool = false
 
     // DMZ edit fields
+    /// SIP ALG lives on the VPN passthrough page in the original build; the
+    /// firmware exposes it next to the firewall, so it is driven from here.
+    var editSipAlg: Bool = false
     var editDmzEnabled: Bool = false
     var editDmzIP: String = ""
 
@@ -37,6 +40,10 @@ final class FirewallSettingsViewModel {
             let data = try await client.getJSON("/api/router/firewall")
             config = FirewallParser.parseConfig(data)
             editDmzEnabled = config.dmzEnabled
+            if let vpn = try? await client.getJSON("/api/router/vpn") {
+                editSipAlg = (vpn["alg_sip_enable"] as? String) == "1"
+                    || (vpn["alg_sip_enable"] as? Bool ?? false)
+            }
             editDmzIP = config.dmzHost
 
             async let pfResult = fetchPortForwardRules()
@@ -143,6 +150,19 @@ final class FirewallSettingsViewModel {
             let _ = try await client.putJSON("/api/router/firewall/upnp", body: ["upnp_switch": enabled ? "1" : "0"])
             showMessage("UPnP 已\(enabled ? "启用" : "停用")", isError: false)
             upnpEnabled = enabled
+        } catch {
+            showMessage("失败：\(error.localizedDescription)", isError: true)
+        }
+        isLoading = false
+    }
+
+    func applySipAlg() async {
+        isLoading = true
+        do {
+            let _ = try await client.putJSON("/api/router/vpn", body: [
+                "alg_sip_enable": editSipAlg ? "1" : "0"
+            ])
+            showMessage("SIP ALG 已\(editSipAlg ? "启用" : "停用")", isError: false)
         } catch {
             showMessage("失败：\(error.localizedDescription)", isError: true)
         }

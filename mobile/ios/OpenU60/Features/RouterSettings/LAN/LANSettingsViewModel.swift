@@ -48,14 +48,18 @@ final class LANSettingsViewModel {
         isLoading = true
 
         do {
-            let _ = try await client.putJSON("/api/router/lan", body: [
-                "lan_ipaddr": editLanIP,
-                "lan_netmask": editNetmask,
-                "dhcp_enable": editDhcpEnabled ? "1" : "0",
+            // The agent takes the firmware's own field names: ipaddr/netmask and a
+            // boolean dhcp_enabled, plus the lease in seconds.
+            let lease = Int(editLeaseTime) ?? 86400
+            let body: [String: Any] = [
+                "ipaddr": editLanIP,
+                "netmask": editNetmask,
+                "dhcp_enabled": editDhcpEnabled,
                 "dhcp_start": editDhcpStart,
                 "dhcp_end": editDhcpEnd,
-                "dhcp_lease_time": editLeaseTime
-            ])
+                "lease_seconds": lease,
+            ]
+            let _ = try await client.putJSON("/api/router/lan", body: body)
             showMessage("LAN 设置已更新", isError: false)
             config = LANConfig(lanIP: editLanIP, netmask: editNetmask, dhcpEnabled: editDhcpEnabled,
                                dhcpStart: editDhcpStart, dhcpEnd: editDhcpEnd, dhcpLeaseTime: editLeaseTime)
