@@ -125,7 +125,9 @@ final class SMSViewModel {
         let idStr = ids.map(String.init).joined(separator: ";") + ";"
 
         do {
-            let _ = try await client.postJSON("/api/sms/delete", body: ["id": idStr])
+            // The agent takes an array of identifiers; the "12;13;" string form
+            // was the other build's wire format.
+            let _ = try await client.postJSON("/api/sms/delete", body: ["ids": ids])
             logger.info("Deleted SMS ids: \(idStr)")
             await refresh()
         } catch {

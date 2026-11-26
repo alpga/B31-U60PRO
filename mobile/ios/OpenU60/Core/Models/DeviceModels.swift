@@ -168,7 +168,9 @@ enum DeviceParser {
         BatteryStatus(
             capacity: asInt(data["battery_capacity"]) ?? -1,
             temperature: validTemperature(data["battery_temperature"]),
-            charging: "",
+            // The card labels itself from `charging`; the agent reports the
+            // firmware's own word ("Charging", "Discharging", "Full").
+            charging: (data["battery_status"] as? String ?? "").lowercased(),
             timeToFull: asInt(data["battery_time_to_full"]) ?? -1,
             timeToEmpty: asInt(data["battery_time_to_empty"]) ?? -1
         )

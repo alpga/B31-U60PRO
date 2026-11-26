@@ -168,7 +168,7 @@ final class FirewallSettingsViewModel {
     func togglePortForward(enabled: Bool) async {
         isLoading = true
         do {
-            let _ = try await client.putJSON("/api/router/firewall/port-forward/switch", body: ["port_forward_switch": enabled ? "1" : "0"])
+            let _ = try await client.putJSON("/api/router/firewall/port-forward/switch", body: ["portforward_enable": enabled ? "1" : "0"])
             showMessage("端口转发已\(enabled ? "启用" : "停用")", isError: false)
             config.portForwardEnabled = enabled
         } catch {

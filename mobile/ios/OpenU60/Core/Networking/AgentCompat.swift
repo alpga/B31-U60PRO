@@ -22,7 +22,12 @@ enum AgentCompat {
         switch path {
         case "/api/device/thermal": return "/api/device/thermal/all"
         case "/api/network/clients": return "/api/network/clients"
-        case "/api/network/lan-status": return "/api/router/lan"
+        case "/api/network/lan-status", "/api/router/lan": return "/api/router/lan"
+        case "/api/router/apn/auto-profiles":
+            // This firmware has one profile list; the app shows it in both tabs.
+            value = data
+        case "/api/dns/status": return "/api/router/dns"
+        case "/api/router/apn/auto-profiles": return "/api/router/apn/profiles"
         case "/api/esim/profiles", "/api/esim/chip", "/api/esim/notifications":
             return "/api/esim"
         default:
@@ -37,6 +42,7 @@ enum AgentCompat {
         switch path {
         case "/api/network/signal", "/api/network/wan", "/api/network/wan6",
              "/api/network/traffic", "/api/network/clients", "/api/network/lan-status",
+             "/api/router/lan", "/api/dns/status", "/api/router/apn/auto-profiles",
              "/api/device/system", "/api/device/thermal", "/api/device/battery-info",
              "/api/battery", "/api/modem/status", "/api/modem/data",
              "/api/modem/network-mode",
@@ -98,6 +104,28 @@ enum AgentCompat {
             value = networkMode(from: data)
         case "/api/network/clients":
             value = hosts(from: data)
+        case "/api/router/lan":
+            // The firmware names these `ipaddr`/`netmask`/`dhcp_enabled`; the LAN
+            // screen reads the older `lan_*` spelling.
+            value = [
+                "lan_ipaddr": data["ipaddr"] as? String ?? "",
+                "lan_netmask": data["netmask"] as? String ?? "",
+                "dhcp_enable": (data["dhcp_enabled"] as? Bool ?? false) ? "1" : "0",
+                "dhcp_start": data["dhcp_start"] as? String ?? "",
+                "dhcp_end": data["dhcp_end"] as? String ?? "",
+                "dhcp_lease_time": String(int(data["lease_seconds"], default: 0)),
+            ]
+        case "/api/dns/status":
+            // `/api/router/dns` uses dns_mode/prefer_dns_manual; the DNS screen
+            // expects mode/primary/secondary plus a stats block.
+            value = [
+                "mode": (data["dns_mode"] as? String == "auto") ? "automatic" : "manual",
+                "primary": data["prefer_dns_manual"] as? String ?? "",
+                "secondary": data["standby_dns_manual"] as? String ?? "",
+                "proxy_running": false,
+                "doh_url": "",
+                "stats": ["cache_entries": 0, "cache_hits": 0, "cache_misses": 0, "queries_total": 0],
+            ]
         case "/api/network/lan-status":
             // `/api/router/lan` carries the address as plain fields; the app reads
             // the ubus shape, so it is rebuilt here.

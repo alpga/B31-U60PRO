@@ -184,6 +184,19 @@ enum SignalParser {
     /// One entry of an `ltecasig` / `nrcasig` list: "RSRP,RSRQ,SINR,RSSI,...".
     private typealias CarrierSignal = (rsrp: Double?, rsrq: Double?, sinr: Double?, rssi: Double?)
 
+    /// The modem reports the PLMN's short name in ASCII (CUCC, CMCC, …); the
+    /// screens show carriers in Chinese.
+    private static func localizedProvider(_ raw: String) -> String {
+        let key = raw.uppercased().trimmingCharacters(in: .whitespaces)
+        switch key {
+        case "CUCC", "UNICOM", "CHINA UNICOM": return "中国联通"
+        case "CMCC", "CHINA MOBILE": return "中国移动"
+        case "CTCC", "CHINA TELECOM": return "中国电信"
+        case "CBN", "CRTC", "CHINA BROADNET": return "中国广电"
+        default: return raw
+        }
+    }
+
     static func parseNetInfo(_ data: [String: Any]) -> (NRSignal, LTESignal, WCDMASignal, OperatorInfo) {
         var nr = NRSignal()
         var lte = LTESignal()
@@ -238,7 +251,7 @@ enum SignalParser {
         wcdma.rscp = parseDouble(data["rscp"]).flatMap { $0 == 0 ? nil : $0 }
         wcdma.ecio = parseDouble(data["ecio"])
 
-        op.provider = stringVal(data["network_provider"])
+        op.provider = Self.localizedProvider(stringVal(data["network_provider"]))
         op.networkType = stringVal(data["network_type"])
         op.signalBar = Int(stringVal(data["signalbar"])) ?? 0
         op.roaming = stringVal(data["simcard_roam"]) == "1"

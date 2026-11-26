@@ -8,9 +8,9 @@ final class VPNPassthroughViewModel {
     var message: String?
     var messageIsError: Bool = false
 
-    var editL2tp: Bool = false
-    var editPptp: Bool = false
-    var editIpsec: Bool = false
+    /// This firmware exposes one passthrough flag — SIP ALG — so the screen
+    /// drives that single switch instead of three that do not exist.
+    var editSipAlg: Bool = false
 
     private let client: AgentClient
     private let authManager: AuthManager
@@ -27,9 +27,8 @@ final class VPNPassthroughViewModel {
         do {
             let data = try await client.getJSON("/api/router/vpn")
             config = VPNPassthroughParser.parse(data)
-            editL2tp = config.l2tp
-            editPptp = config.pptp
-            editIpsec = config.ipsec
+            editSipAlg = (data["alg_sip_enable"] as? String) == "1"
+                || (data["alg_sip_enable"] as? Bool ?? false)
         } catch {
             showMessage("加载 VPN 设置失败：\(error.localizedDescription)", isError: true)
         }
@@ -42,12 +41,10 @@ final class VPNPassthroughViewModel {
 
         do {
             let _ = try await client.putJSON("/api/router/vpn", body: [
-                "l2tp_passthrough": editL2tp ? "1" : "0",
-                "pptp_passthrough": editPptp ? "1" : "0",
-                "ipsec_passthrough": editIpsec ? "1" : "0"
+                "alg_sip_enable": editSipAlg ? "1" : "0"
             ])
             showMessage("VPN 透传设置已更新", isError: false)
-            config = VPNPassthroughConfig(l2tp: editL2tp, pptp: editPptp, ipsec: editIpsec)
+            config = VPNPassthroughConfig(l2tp: editSipAlg, pptp: editSipAlg, ipsec: editSipAlg)
         } catch {
             showMessage("失败：\(error.localizedDescription)", isError: true)
         }

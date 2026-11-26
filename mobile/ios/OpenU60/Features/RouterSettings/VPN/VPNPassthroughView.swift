@@ -15,9 +15,7 @@ struct VPNPassthroughView: View {
             }
 
             Section("VPN 透传") {
-                Toggle("L2TP", isOn: $viewModel.editL2tp)
-                Toggle("PPTP", isOn: $viewModel.editPptp)
-                Toggle("IPSec", isOn: $viewModel.editIpsec)
+                Toggle("SIP ALG", isOn: $viewModel.editSipAlg)
             }
 
             Section {
