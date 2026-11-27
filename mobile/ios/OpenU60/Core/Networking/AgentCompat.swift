@@ -24,6 +24,7 @@ enum AgentCompat {
         case "/api/network/clients": return "/api/network/clients"
         case "/api/network/lan-status", "/api/router/lan": return "/api/router/lan"
         case "/api/dns/status": return "/api/router/dns"
+        case "/api/router/firewall": return "/api/router/firewall"
         case "/api/router/apn/auto-profiles": return "/api/router/apn/profiles"
         case "/api/esim/profiles", "/api/esim/chip", "/api/esim/notifications":
             return "/api/esim"
@@ -40,6 +41,7 @@ enum AgentCompat {
         case "/api/network/signal", "/api/network/wan", "/api/network/wan6",
              "/api/network/traffic", "/api/network/clients", "/api/network/lan-status",
              "/api/router/lan", "/api/dns/status", "/api/router/apn/auto-profiles",
+             "/api/router/firewall",
              "/api/device/system", "/api/device/thermal", "/api/device/battery-info",
              "/api/battery", "/api/modem/status", "/api/modem/data",
              "/api/modem/network-mode",
@@ -128,6 +130,19 @@ enum AgentCompat {
                 "dns_sec": dnsValue(data["dns_sec"]),
             ]
             value = lan
+        case "/api/router/firewall":
+            // The firmware names the switches `*_enable`; the screen reads the
+            // `*_switch` spelling it was written against.
+            let firewall: [String: Any] = [
+                "firewall_switch": data["firewall_enable"] ?? "0",
+                "nat_switch": data["nat_enable"] ?? "0",
+                "dmz_enabled": data["dmz_enable"] ?? "0",
+                "dmz_ip": data["dmz_ip"] ?? "",
+                "firewall_level": data["level"] ?? "Medium",
+                "wan_ping_filter": data["wan_ping_enable"] ?? "0",
+                "port_forward_switch": data["portforward_enable"] ?? "0",
+            ]
+            value = firewall
         case "/api/router/apn/auto-profiles":
             // This firmware has one profile list; the app shows it in both tabs.
             value = data
@@ -217,12 +232,23 @@ enum AgentCompat {
         var value = battery(from: data)
         if let detail = try JSONSerialization.jsonObject(with: info) as? [String: Any],
            let payload = detail["data"] as? [String: Any] {
-            // `battery/detail` reports seconds; the app's model is in minutes.
-            if let secs = payload["time_to_full_secs"] as? NSNumber, secs.doubleValue > 0 {
-                value["battery_time_to_full"] = Int(secs.doubleValue / 60)
-            }
-            if let secs = payload["time_to_empty_secs"] as? NSNumber, secs.doubleValue > 0 {
-                value["battery_time_to_empty"] = Int(secs.doubleValue / 60)
+            // The firmware's own ETAs are unusable here (`time_to_full_secs` is
+            // null and the empty estimate is days long), so they are derived from
+            // pack capacity, design capacity and the instantaneous current.
+            let capacity = double(payload["capacity"])
+            let design = double(payload["charge_full_design_mah"])
+            let current = double(payload["current_ma"])
+            let status = payload["status"] as? String ?? ""
+            let rate = abs(current)
+            if design > 0, capacity > 0, rate >= 10 {
+                if status == "Charging", current > 0 {
+                    let hours = (100 - capacity) / 100 * design / rate
+                    value["battery_time_to_full"] = Int(hours * 60)
+                }
+                if status == "Discharging", current < 0 {
+                    let hours = capacity / 100 * design / rate
+                    value["battery_time_to_empty"] = Int(hours * 60)
+                }
             }
             if let online = payload["online"] as? Bool { value["online"] = online }
         }

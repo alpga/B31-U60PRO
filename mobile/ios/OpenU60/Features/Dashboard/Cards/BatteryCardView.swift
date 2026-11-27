@@ -110,12 +110,16 @@ struct BatteryCardView: View, Equatable {
         }
     }
 
+    /// Under a day the estimate is shown in minutes; past a day only hours are
+    /// meaningful, because the current draw moves the result far more than an hour.
     private func formatETA(_ minutes: Int) -> String {
         if minutes >= 1440 {
-            let d = minutes / 1440, h = (minutes % 1440) / 60, m = minutes % 60
-            return "\(d)d \(h)h \(m)m"
+            return "\(minutes / 60) 小时"
         }
-        return minutes >= 60 ? "\(minutes / 60)h \(minutes % 60)m" : "\(minutes)m"
+        if minutes >= 60 {
+            return "\(minutes / 60) 小时 \(minutes % 60) 分钟"
+        }
+        return "\(minutes) 分钟"
     }
 
     private func batteryIcon(_ percent: Int) -> String {
