@@ -254,12 +254,24 @@ enum MobileNetworkParser {
     static func parseScanResults(_ data: [String: Any]) -> [NetworkOperator] {
         guard let list = data["m_netselect_contents"] as? [[String: Any]] else { return [] }
         return list.map { item in
-            NetworkOperator(
-                name: item["name"] as? String ?? item["operator_name"] as? String ?? "",
+            let raw = item["name"] as? String ?? item["operator_name"] as? String ?? ""
+            return NetworkOperator(
+                name: Self.localizedCarrier(raw),
                 mccMnc: item["mcc_mnc"] as? String ?? item["plmn"] as? String ?? "",
                 rat: item["rat"] as? String ?? "",
                 status: item["status"] as? String ?? "available"
             )
+        }
+    }
+
+    /// The scan lists carriers by their PLMN short name; the picker shows Chinese.
+    private static func localizedCarrier(_ raw: String) -> String {
+        switch raw.uppercased() {
+        case "UNICOM", "CUCC": return "中国联通"
+        case "CMCC": return "中国移动"
+        case "CT", "CTCC": return "中国电信"
+        case "CBN", "CRTC": return "中国广电"
+        default: return raw
         }
     }
 

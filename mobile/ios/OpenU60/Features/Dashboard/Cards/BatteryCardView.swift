@@ -156,8 +156,14 @@ struct BatteryDetailSheet: View {
                     Spacer()
                     TemperatureValueText(value: battery.temperature).foregroundStyle(.secondary)
                 }
-                row("充满所需时间", icon: "battery.100.bolt", value: battery.charging == "charging" && battery.timeToFull > 0 ? formatETA(battery.timeToFull) : "—")
-                row("放电剩余时间", icon: "battery.25", value: battery.charging == "discharging" && battery.timeToEmpty > 0 ? formatETA(battery.timeToEmpty) : "—")
+                // Direct-power mode (the router runs off the adapter) has no charge
+                // estimate at all; saying so beats a dash that looks like a bug.
+                row("充满所需时间", icon: "battery.100.bolt",
+                    value: battery.charging == "stopped" ? "直供模式（未充电）"
+                        : (battery.charging == "charging" && battery.timeToFull > 0 ? formatETA(battery.timeToFull) : "—"))
+                row("放电剩余时间", icon: "battery.25",
+                    value: battery.charging == "stopped" ? "直供模式（未放电）"
+                        : (battery.charging == "discharging" && battery.timeToEmpty > 0 ? formatETA(battery.timeToEmpty) : "—"))
             }
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
             .navigationTitle("电池详情")

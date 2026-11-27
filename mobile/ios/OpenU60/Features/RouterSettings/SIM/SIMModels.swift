@@ -27,6 +27,17 @@ struct SIMLockInfo: Equatable {
 
 enum SIMParser {
     static func parseSIMInfo(_ data: [String: Any]) -> SIMInfo {
+    /// The firmware reports the PLMN short name (CUCC); the screen shows Chinese.
+    private static func localizedOperator(_ raw: String) -> String {
+        switch raw.uppercased().trimmingCharacters(in: .whitespaces) {
+        case "CUCC", "UNICOM": return "中国联通"
+        case "CMCC", "CHINA MOBILE": return "中国移动"
+        case "CTCC", "CHINA TELECOM": return "中国电信"
+        case "CBN", "CRTC": return "中国广电"
+        default: return raw
+        }
+    }
+
         var info = SIMInfo()
         info.iccid = data["sim_iccid"] as? String ?? ""
         info.imsi = data["sim_imsi"] as? String ?? ""
@@ -34,7 +45,7 @@ enum SIMParser {
         info.mcc = data["mdm_mcc"] as? String ?? ""
         info.mnc = data["mdm_mnc"] as? String ?? ""
         info.simStatus = data["sim_states"] as? String ?? ""
-        info.operatorName = data["Operator"] as? String ?? ""
+        info.operatorName = Self.localizedOperator(data["Operator"] as? String ?? "")
         info.currentSlot = data["current_sim_slot"] as? String ?? ""
         info.pinStatus = data["pin_status"] as? String ?? ""
         info.pinAttempts = asInt(data["pinnumber"]) ?? 0

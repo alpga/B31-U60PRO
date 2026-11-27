@@ -152,10 +152,19 @@ enum AgentCompat {
             let stats: [String: Any] = [
                 "cache_entries": 0, "cache_hits": 0, "cache_misses": 0, "queries_total": 0,
             ]
+            // In automatic mode the servers come from the WAN lease, not from the
+            // manual fields, so the screen shows what the operator handed out.
+            let automatic = (data["dns_mode"] as? String) == "auto"
+            let wan = data["wan"] as? [String: Any] ?? [:]
+            let leased = wan["dns-server"] as? [String] ?? []
             let dns: [String: Any] = [
-                "mode": (data["dns_mode"] as? String == "auto") ? "automatic" : "manual",
-                "primary": data["prefer_dns_manual"] as? String ?? "",
-                "secondary": data["standby_dns_manual"] as? String ?? "",
+                "mode": automatic ? "automatic" : "manual",
+                "primary": automatic
+                    ? (leased.first ?? "")
+                    : (data["prefer_dns_manual"] as? String ?? ""),
+                "secondary": automatic
+                    ? (leased.dropFirst().first ?? "")
+                    : (data["standby_dns_manual"] as? String ?? ""),
                 "proxy_running": false,
                 "doh_url": "",
                 "stats": stats,

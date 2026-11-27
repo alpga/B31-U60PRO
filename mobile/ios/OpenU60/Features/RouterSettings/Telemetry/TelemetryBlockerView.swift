@@ -33,14 +33,29 @@ struct TelemetryBlockerView: View {
                 .disabled(viewModel.isLoading)
 
                 ForEach(TelemetryParser.knownTelemetryDomains, id: \.self) { domain in
-                    let isBlocked = viewModel.filterConfig.rules.contains { $0.domain == domain }
-                    HStack {
-                        Text(domain)
-                            .font(.caption)
-                        Spacer()
-                        Image(systemName: isBlocked ? "checkmark.circle.fill" : "circle")
-                            .foregroundStyle(isBlocked ? .green : .secondary)
+                    let rule = viewModel.filterConfig.rules.first { $0.domain == domain }
+                    // Each row is the switch for that domain: tapping adds the rule,
+                    // tapping again removes it.
+                    Button {
+                        Task {
+                            if let rule {
+                                await viewModel.removeDomain(rule)
+                            } else {
+                                await viewModel.addDomain(domain)
+                            }
+                        }
+                    } label: {
+                        HStack {
+                            Text(domain)
+                                .font(.caption)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            Image(systemName: rule != nil ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(rule != nil ? .green : .secondary)
+                        }
                     }
+                    .buttonStyle(.plain)
+                    .disabled(viewModel.isLoading)
                 }
             }
 
