@@ -83,6 +83,13 @@ enum CellLockParser {
         if let b = value as? Bool { return b }
         return false
     }
+
+    private static func asInt(_ value: Any?) -> Int? {
+        if let i = value as? Int { return i }
+        if let s = value as? String { return Int(s) }
+        if let d = value as? Double { return Int(d) }
+        return nil
+    }
 }
 
 // MARK: - STC (Smart Tower Connect)
@@ -619,13 +626,27 @@ enum LANParser {
 
 struct QoSConfig: Equatable {
     var enabled: Bool
+    var downloadRate: Int = 0
+    var downloadUnit: Int = 0
+    var uploadRate: Int = 0
+    var uploadUnit: Int = 0
+    var smartEnabled: Bool = false
+    var smartPriType: Int = 0
 
     static let empty = QoSConfig(enabled: false)
 }
 
 enum QoSParser {
     static func parse(_ data: [String: Any]) -> QoSConfig {
-        QoSConfig(enabled: asBool(data["qos_switch"]))
+        QoSConfig(
+            enabled: asBool(data["qos_switch"]),
+            downloadRate: asInt(data["download_total_limit_rate"]) ?? 0,
+            downloadUnit: asInt(data["download_total_limit_unit"]) ?? 0,
+            uploadRate: asInt(data["upload_total_limit_rate"]) ?? 0,
+            uploadUnit: asInt(data["upload_total_limit_unit"]) ?? 0,
+            smartEnabled: asBool(data["qos_smart_switch"]),
+            smartPriType: asInt(data["qos_smart_pri_type"]) ?? 0
+        )
     }
 
     private static func asBool(_ value: Any?) -> Bool {

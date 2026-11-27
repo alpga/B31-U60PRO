@@ -35,6 +35,11 @@ struct SettingsView: View {
                         if viewModel.isDetectingGateway {
                             ProgressView()
                         }
+                        if let note = viewModel.detectionMessage {
+                            Text(note)
+                                .font(.caption2)
+                                .foregroundStyle(viewModel.detectionFailed ? .red : .green)
+                        }
                     }
                 } header: {
                     Text("网关")

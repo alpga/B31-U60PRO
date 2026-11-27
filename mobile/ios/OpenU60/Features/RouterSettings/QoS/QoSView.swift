@@ -21,6 +21,34 @@ struct QoSView: View {
                 ))
                 .disabled(viewModel.isLoading)
             }
+
+            if viewModel.config.enabled {
+                Section("总带宽限制") {
+                    limitRow(title: "下载",
+                             rate: $viewModel.editDownloadRate,
+                             unit: $viewModel.editDownloadUnit)
+                    limitRow(title: "上传",
+                             rate: $viewModel.editUploadRate,
+                             unit: $viewModel.editUploadUnit)
+                    Text("0 表示不限速")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("智能 QoS") {
+                    Toggle("启用智能 QoS", isOn: $viewModel.editSmart)
+                }
+
+                Section {
+                    Button {
+                        Task { await viewModel.apply() }
+                    } label: {
+                        Text("应用限速设置")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .disabled(viewModel.isLoading)
+                }
+            }
         }
         .navigationTitle("QoS")
         .refreshable { await viewModel.refresh() }
@@ -32,5 +60,24 @@ struct QoSView: View {
             }
         }
         .task { await viewModel.refresh() }
+    }
+
+    private func limitRow(title: String, rate: Binding<String>, unit: Binding<Int>) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(title)
+                Spacer()
+                TextField("0", text: rate)
+                    .keyboardType(.numberPad)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 90)
+                Picker("", selection: unit) {
+                    Text("Kbps").tag(0)
+                    Text("Mbps").tag(1)
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+            }
+        }
     }
 }

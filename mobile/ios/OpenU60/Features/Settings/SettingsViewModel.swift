@@ -23,6 +23,8 @@ final class SettingsViewModel {
     var showSavedConfirmation: Bool = false
     var isDetectingGateway: Bool = false
     var detectionFailed: Bool = false
+    /// Shown under the gateway row: a successful probe used to look like a no-op.
+    var detectionMessage: String?
     private(set) var hasStoredPassword: Bool = false
 
     private let client: AgentClient
@@ -53,6 +55,7 @@ final class SettingsViewModel {
     func autoDetectGateway() async {
         isDetectingGateway = true
         detectionFailed = false
+        detectionMessage = nil
         defer { isDetectingGateway = false }
 
         let startingIP = committedGatewayIP
@@ -62,6 +65,7 @@ final class SettingsViewModel {
             client.baseURL = Self.agentURL(for: ip)
             if await client.ping(), await isAgentReachable() {
                 gatewayIP = ip
+                detectionMessage = "已连接 \(ip)：9090"
                 return
             }
         }
@@ -72,6 +76,9 @@ final class SettingsViewModel {
         // the failure notice, which would be about a search they have already moved past.
         client.baseURL = Self.agentURL(for: committedGatewayIP)
         detectionFailed = committedGatewayIP == startingIP
+        if detectionFailed {
+            detectionMessage = "四个候选网关都没有响应"
+        }
     }
 
     /// `ping()` only proves *something* is listening on the port. Confirm it speaks the agent's
