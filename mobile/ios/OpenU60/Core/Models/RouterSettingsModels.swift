@@ -84,12 +84,6 @@ enum CellLockParser {
         return false
     }
 
-    private static func asInt(_ value: Any?) -> Int? {
-        if let i = value as? Int { return i }
-        if let s = value as? String { return Int(s) }
-        if let d = value as? Double { return Int(d) }
-        return nil
-    }
 }
 
 // MARK: - STC (Smart Tower Connect)
@@ -656,6 +650,13 @@ enum QoSParser {
         if let num = value as? Int { return num != 0 }
         if let b = value as? Bool { return b }
         return false
+    }
+
+    private static func asInt(_ value: Any?) -> Int? {
+        if let i = value as? Int { return i }
+        if let s = value as? String { return Int(s) }
+        if let d = value as? Double { return Int(d) }
+        return nil
     }
 }
 
