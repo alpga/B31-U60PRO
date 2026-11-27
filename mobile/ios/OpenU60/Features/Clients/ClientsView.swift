@@ -29,8 +29,17 @@ struct ClientsView: View {
                 Section("\(filteredDevices.count) 台设备") {
                     ForEach(filteredDevices) { device in
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(device.displayName)
-                                .font(.body.weight(.medium))
+                            HStack(spacing: 6) {
+                                Text(device.displayName)
+                                    .font(.body.weight(.medium))
+                                if !device.connection.isEmpty {
+                                    Text(device.connection)
+                                        .font(.caption2)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(Color(.secondarySystemFill), in: Capsule())
+                                }
+                            }
                             HStack(spacing: 12) {
                                 Label(device.ipAddress.isEmpty ? "--" : device.ipAddress, systemImage: "network")
                                     .font(.caption)

@@ -74,7 +74,7 @@ struct DeviceControlView: View {
             }
 
             Section {
-                Toggle("节能模式", isOn: Binding(
+                Toggle("省电模式", isOn: Binding(
                     get: { viewModel.powerSaveEnabled },
                     set: { val in
                         viewModel.powerSaveEnabled = val
@@ -85,7 +85,7 @@ struct DeviceControlView: View {
             } footer: {
                 Text(viewModel.powerSaveSupported
                      ? "限制数据通信速度，以降低功耗并延长电池续航。"
-                     : "此固件不提供节能接口，开关不可用。")
+                     : "此固件未提供省电接口（B31），开关暂不可用。")
             }
 
             Section {

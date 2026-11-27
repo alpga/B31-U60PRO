@@ -46,19 +46,30 @@ private struct DeviceRow: View, Equatable {
     let name: String
     let macAddress: String
     let ipAddress: String
+    let connection: String
     let globalIPv6: String?
 
     init(device: ConnectedDevice) {
         name = device.displayName
         macAddress = device.macAddress
         ipAddress = device.ipAddress
+        connection = device.connection
         globalIPv6 = device.ip6Addresses.first(where: { !$0.hasPrefix("fe80") })
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(name)
-                .font(.subheadline.bold())
+            HStack(spacing: 6) {
+                Text(name)
+                    .font(.subheadline.bold())
+                if !connection.isEmpty {
+                    Text(connection)
+                        .font(.caption2)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color(.secondarySystemFill), in: Capsule())
+                }
+            }
             HStack {
                 Text(macAddress)
                     .font(.caption2.monospaced())

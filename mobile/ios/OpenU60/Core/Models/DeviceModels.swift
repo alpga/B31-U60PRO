@@ -87,6 +87,8 @@ struct ConnectedDevice: Identifiable, Equatable {
     var ip6Addresses: [String]
     var macAddress: String
     var dhcpHostname: String
+    /// Human label for the attachment, e.g. "USB 直连" or "Wi-Fi 5G".
+    var connection: String = ""
 
     var displayName: String {
         if !dhcpHostname.isEmpty { return dhcpHostname }
@@ -300,7 +302,8 @@ enum DeviceParser {
                 ipAddress: ip,
                 ip6Addresses: ip6Addrs,
                 macAddress: mac,
-                dhcpHostname: ""
+                dhcpHostname: "",
+                connection: Self.connectionLabel(info)
             ))
         }
 
@@ -331,6 +334,25 @@ enum DeviceParser {
             octets += 1
         }
         return octets == 4 ? key : nil
+    }
+
+    /// The agent reports `medium`/`wifi_band`/`interface`; the list shows a short
+    /// label the user can act on ("USB 直连" rather than "rndis0").
+    private static func connectionLabel(_ info: [String: Any]) -> String {
+        let interface = (info["interface"] as? String ?? "").lowercased()
+        let medium = (info["medium"] as? String ?? "").lowercased()
+        let band = info["wifi_band"] as? String ?? ""
+        if interface.hasPrefix("rndis") || interface.hasPrefix("usb") {
+            return "USB 直连"
+        }
+        if medium == "wifi" {
+            if band.contains("2.4") { return "Wi-Fi 2.4G" }
+            if band.contains("6") { return "Wi-Fi 6G" }
+            if band.contains("5") { return "Wi-Fi 5G" }
+            return "Wi-Fi"
+        }
+        if medium == "wired" { return "有线" }
+        return ""
     }
 
     static func enrichWithDHCP(devices: inout [ConnectedDevice], leases: [[String: Any]]) {

@@ -31,6 +31,15 @@ struct DNSSettingsView: View {
 
             // MARK: - DNS Servers
 
+            if viewModel.selectedMode == .auto {
+                // Automatic mode still has servers worth showing: the ones the
+                // operator handed out on the WAN lease.
+                Section("DNS 服务器（运营商分配）") {
+                    LabeledContent("首选", value: viewModel.config.primaryDns.isEmpty ? "—" : viewModel.config.primaryDns)
+                    LabeledContent("备用", value: viewModel.config.secondaryDns.isEmpty ? "—" : viewModel.config.secondaryDns)
+                }
+            }
+
             if viewModel.selectedMode != .auto {
                 Section("DNS 服务器") {
                     TextField("首选", text: $viewModel.editPrimary)

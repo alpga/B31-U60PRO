@@ -138,7 +138,7 @@ enum AgentCompat {
                 "nat_switch": data["nat_enable"] ?? "0",
                 "dmz_enabled": data["dmz_enable"] ?? "0",
                 "dmz_ip": data["dmz_ip"] ?? "",
-                "firewall_level": data["level"] ?? "Medium",
+                "firewall_level": ((data["level"] as? String) ?? "Medium").lowercased(),
                 "wan_ping_filter": data["wan_ping_enable"] ?? "0",
                 "port_forward_switch": data["portforward_enable"] ?? "0",
             ]
@@ -333,7 +333,16 @@ enum AgentCompat {
             guard let mac = client["mac"] as? String, !mac.isEmpty else { continue }
             let name = client["hostname"] as? String ?? ""
             let ip = client["ip"] as? String ?? ""
-            hosts[mac] = ["name": name, "ipaddrs": ip.isEmpty ? [] : [ip], "ip6addrs": []]
+            hosts[mac] = [
+                "name": name,
+                "ipaddrs": ip.isEmpty ? [] : [ip],
+                "ip6addrs": [],
+                // How the client is attached: the device list shows this.
+                "medium": client["medium"] ?? "",
+                "medium_detail": client["medium_detail"] ?? "",
+                "wifi_band": client["wifi_band"] ?? "",
+                "interface": client["interface"] ?? "",
+            ]
             leases.append(["macaddr": mac, "hostname": name])
         }
         return ["hosts": hosts, "dhcp_leases": leases]
