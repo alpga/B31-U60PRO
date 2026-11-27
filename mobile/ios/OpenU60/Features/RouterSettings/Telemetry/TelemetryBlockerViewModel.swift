@@ -74,9 +74,10 @@ final class TelemetryBlockerViewModel {
         isLoading = true
 
         do {
+            // The agent deletes by name: the firmware has no rule id of its own.
             let _ = try await client.putJSON("/api/router/domain-filter", body: [
                 "action": "delete",
-                "id": rule.id
+                "domain": rule.domain
             ])
             showMessage("已移除 \(rule.domain)", isError: false)
             filterConfig.rules.removeAll { $0.id == rule.id }

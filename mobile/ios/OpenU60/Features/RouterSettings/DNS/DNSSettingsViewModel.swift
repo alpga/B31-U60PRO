@@ -85,6 +85,13 @@ final class DNSSettingsViewModel {
                 }
                 initialLoadDone = true
             }
+            // Automatic mode means the operator's servers: show them every time the
+            // screen opens, not only on the first load.
+            if mode == "automatic" {
+                selectedMode = .auto
+                editPrimary = config.primaryDns
+                editSecondary = config.secondaryDns
+            }
             if doh.enabled {
                 await refreshCache()
             }

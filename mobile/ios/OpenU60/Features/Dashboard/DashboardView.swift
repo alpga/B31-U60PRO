@@ -118,7 +118,15 @@ struct DashboardView: View {
                     ConnectionSignalDetail(dashboard: viewModel, viewModel: signalMonitorVM,
                                            networkModeViewModel: networkModeVM)
                 } else {
+                    // The dashboard's own .task normally creates this; if the sheet
+                    // is opened before that runs, build it here instead of spinning
+                    // forever.
                     ProgressView("正在加载连接详情…")
+                        .task {
+                            if signalMonitorVM == nil {
+                                signalMonitorVM = SignalMonitorViewModel(client: client, authManager: authManager)
+                            }
+                        }
                 }
             }
         case .traffic, .wifi:
