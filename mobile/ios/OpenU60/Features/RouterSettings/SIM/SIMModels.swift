@@ -26,7 +26,6 @@ struct SIMLockInfo: Equatable {
 }
 
 enum SIMParser {
-    static func parseSIMInfo(_ data: [String: Any]) -> SIMInfo {
     /// The firmware reports the PLMN short name (CUCC); the screen shows Chinese.
     private static func localizedOperator(_ raw: String) -> String {
         switch raw.uppercased().trimmingCharacters(in: .whitespaces) {
@@ -38,6 +37,7 @@ enum SIMParser {
         }
     }
 
+    static func parseSIMInfo(_ data: [String: Any]) -> SIMInfo {
         var info = SIMInfo()
         info.iccid = data["sim_iccid"] as? String ?? ""
         info.imsi = data["sim_imsi"] as? String ?? ""
