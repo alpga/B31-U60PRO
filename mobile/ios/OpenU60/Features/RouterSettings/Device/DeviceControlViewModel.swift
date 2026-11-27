@@ -12,6 +12,8 @@ final class DeviceControlViewModel {
     var chargeLimit: Int = 100
     var hysteresis: Int = 5
     var powerSaveEnabled: Bool = false
+    /// False when the firmware has no power-save interface (B31 does not).
+    var powerSaveSupported: Bool = true
     var fastBootEnabled: Bool = false
     var autoSleepEnabled: Bool = false
     var autoSleepTimeout: String = "5"
@@ -54,7 +56,10 @@ final class DeviceControlViewModel {
             }
             powerSaveLoaded = true
         } catch {
-            showMessage("加载节能设置失败", isError: true)
+            // This firmware has no power-save object at all; saying so is more
+            // useful than an error the user cannot act on.
+            powerSaveSupported = false
+            showMessage("此固件不提供节能设置", isError: false)
         }
 
         do {

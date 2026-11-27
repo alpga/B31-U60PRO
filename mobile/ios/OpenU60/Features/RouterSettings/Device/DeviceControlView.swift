@@ -81,9 +81,11 @@ struct DeviceControlView: View {
                         Task { await viewModel.setPowerSave(enabled: val) }
                     }
                 ))
-                    .disabled(controlsDisabled)
+                    .disabled(controlsDisabled || !viewModel.powerSaveSupported)
             } footer: {
-                Text("限制数据通信速度，以降低功耗并延长电池续航。")
+                Text(viewModel.powerSaveSupported
+                     ? "限制数据通信速度，以降低功耗并延长电池续航。"
+                     : "此固件不提供节能接口，开关不可用。")
             }
 
             Section {

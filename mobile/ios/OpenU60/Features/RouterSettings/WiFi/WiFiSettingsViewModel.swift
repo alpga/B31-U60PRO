@@ -71,7 +71,11 @@ final class WiFiSettingsViewModel {
             "wifi_onoff": editWifiOnOff ? "1" : "0",
             "radio2_disabled": editRadio2gDisabled ? "1" : "0",
             "radio5_disabled": editRadio5gDisabled ? "1" : "0",
-            "wifi6_switch": editWifi7Enabled ? "1" : "0",
+            // Wi-Fi 7 is the protocol generation, not the Wi-Fi 6 switch: the
+            // firmware selects it through hwmode (11be), which is what the
+            // bandwidth options then follow.
+            "hwmode_2g": editWifi7Enabled ? "11beg" : "11axg",
+            "hwmode_5g": editWifi7Enabled ? "11bea" : "11axa",
             "htmode_2g": editBandwidth2g,
             "htmode_5g": editBandwidth5g
         ]

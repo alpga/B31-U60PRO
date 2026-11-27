@@ -487,7 +487,7 @@ enum WiFiParser {
             hidden5g: asBool(data["hidden_5g"]),
             radio2gDisabled: asBool(data["radio2_disabled"]),
             radio5gDisabled: asBool(data["radio5_disabled"]),
-            wifi7Enabled: isCompanion ? asBool(data["wifi6_switch"]) : false,
+            wifi7Enabled: (data["hwmode_5g"] as? String ?? "").hasPrefix("11be"),
             bandwidth2g: isCompanion ? normalizeBandwidth(data["htmode_2g"] as? String, is5g: false) : "auto",
             bandwidth5g: isCompanion ? normalizeBandwidth(data["htmode_5g"] as? String, is5g: true) : "auto"
         )
