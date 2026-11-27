@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct QoSView: View {
-    var viewModel: QoSViewModel
+    @Bindable var viewModel: QoSViewModel
 
     var body: some View {
         List {
